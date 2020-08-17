@@ -1,0 +1,19 @@
+[package]
+name = "opgm"
+version = "0.0.0"
+authors = ["E-Neo <e-neo@qq.com>"]
+edition = "2018"
+license = "GPL-3.0"
+description = "Out-of-core property graph matching"
+documentation = "https://docs.rs/opgm"
+repository = "https://github.com/E-Neo/opgm"
+readme = "README.md"
+
+[dependencies]
+clap = "2.33"
+derive_more = "0.99"
+itertools = "0.9"
+memmap = "0.7"
+nom = "5.1"
+sqlite = "0.25"
+tempfile = "3.1"
