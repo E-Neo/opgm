@@ -85,7 +85,7 @@ mod tests {
                 assert_eq!(
                     vec![8, 9, 10, 11]
                         .into_iter()
-                        .map(p.vertex_constraint(2).unwrap().unwrap())
+                        .map(p.vertex_constraint(2).unwrap().unwrap().f())
                         .collect::<Vec<_>>(),
                     vec![true, true, false, false]
                 );
@@ -93,8 +93,8 @@ mod tests {
                     vec![(1, 1), (1, 2), (2, 3), (3, 2)]
                         .into_iter()
                         .map(|(u1, u2)| (
-                            p.edge_constraint(1, 2).unwrap().unwrap()(u1, u2),
-                            p.edge_constraint(2, 1).unwrap().unwrap()(u2, u1)
+                            p.edge_constraint(1, 2).unwrap().unwrap().f()(u1, u2),
+                            p.edge_constraint(2, 1).unwrap().unwrap().f()(u2, u1)
                         ))
                         .collect::<Vec<_>>(),
                     vec![false, true, true, false]

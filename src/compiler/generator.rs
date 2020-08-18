@@ -93,50 +93,50 @@ fn merge_exprs(mut exprs: Vec<Expr>) -> Expr {
     }
 }
 
-fn emit_vertex_constraint_and(args: &[Expr]) -> Box<VertexConstraint> {
-    let args: Vec<Box<VertexConstraint>> = args.iter().map(emit_vertex_constraint).collect();
-    Box::new(move |vid| args.iter().all(|f| f(vid)))
+fn emit_vertex_constraint_and(args: &[Expr]) -> VertexConstraint {
+    let args: Vec<_> = args.iter().map(emit_vertex_constraint).collect();
+    VertexConstraint::new(Box::new(move |vid| args.iter().all(|f| f.f()(vid))))
 }
 
-fn emit_vertex_constraint_or(args: &[Expr]) -> Box<VertexConstraint> {
-    let args: Vec<Box<VertexConstraint>> = args.iter().map(emit_vertex_constraint).collect();
-    Box::new(move |vid| args.iter().any(|f| f(vid)))
+fn emit_vertex_constraint_or(args: &[Expr]) -> VertexConstraint {
+    let args: Vec<_> = args.iter().map(emit_vertex_constraint).collect();
+    VertexConstraint::new(Box::new(move |vid| args.iter().any(|f| f.f()(vid))))
 }
 
-fn emit_vertex_constraint_not(arg: &Expr) -> Box<VertexConstraint> {
+fn emit_vertex_constraint_not(arg: &Expr) -> VertexConstraint {
     let arg = emit_vertex_constraint(arg);
-    Box::new(move |vid| !arg(vid))
+    VertexConstraint::new(Box::new(move |vid| !arg.f()(vid)))
 }
 
-fn emit_vertex_constraint_lt(left: &Expr, right: &Expr) -> Box<VertexConstraint> {
+fn emit_vertex_constraint_lt(left: &Expr, right: &Expr) -> VertexConstraint {
     match (left, right) {
         (Expr::Constant(Atom::VId(_)), Expr::Constant(Atom::Num(n))) => {
             let n = *n;
-            Box::new(move |vid| vid < n)
+            VertexConstraint::new(Box::new(move |vid| vid < n))
         }
         (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(_))) => {
             let n = *n;
-            Box::new(move |vid| n < vid)
+            VertexConstraint::new(Box::new(move |vid| n < vid))
         }
         _ => panic!("Invalid vertex constraint LT"),
     }
 }
 
-fn emit_vertex_constraint_ge(left: &Expr, right: &Expr) -> Box<VertexConstraint> {
+fn emit_vertex_constraint_ge(left: &Expr, right: &Expr) -> VertexConstraint {
     match (left, right) {
         (Expr::Constant(Atom::VId(_)), Expr::Constant(Atom::Num(n))) => {
             let n = *n;
-            Box::new(move |vid| vid >= n)
+            VertexConstraint::new(Box::new(move |vid| vid >= n))
         }
         (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(_))) => {
             let n = *n;
-            Box::new(move |vid| n >= vid)
+            VertexConstraint::new(Box::new(move |vid| n >= vid))
         }
         _ => panic!("Invalid vertex constraint GE"),
     }
 }
 
-fn emit_vertex_constraint(expr: &Expr) -> Box<VertexConstraint> {
+fn emit_vertex_constraint(expr: &Expr) -> VertexConstraint {
     match expr {
         Expr::Constant(_) => panic!("Vertex constraint should not be Constant"),
         Expr::Application(fun, args) => {
@@ -155,70 +155,78 @@ fn emit_vertex_constraint(expr: &Expr) -> Box<VertexConstraint> {
     }
 }
 
-fn emit_edge_constraint_and(args: &[Expr]) -> Box<EdgeConstraint> {
-    let args: Vec<Box<EdgeConstraint>> = args.iter().map(emit_edge_constraint).collect();
-    Box::new(move |u1, u2| args.iter().all(|f| f(u1, u2)))
+fn emit_edge_constraint_and(args: &[Expr]) -> EdgeConstraint {
+    let args: Vec<_> = args.iter().map(emit_edge_constraint).collect();
+    EdgeConstraint::new(Box::new(move |u1, u2| args.iter().all(|f| f.f()(u1, u2))))
 }
 
-fn emit_edge_constraint_or(args: &[Expr]) -> Box<EdgeConstraint> {
-    let args: Vec<Box<EdgeConstraint>> = args.iter().map(emit_edge_constraint).collect();
-    Box::new(move |u1, u2| args.iter().any(|f| f(u1, u2)))
+fn emit_edge_constraint_or(args: &[Expr]) -> EdgeConstraint {
+    let args: Vec<_> = args.iter().map(emit_edge_constraint).collect();
+    EdgeConstraint::new(Box::new(move |u1, u2| args.iter().any(|f| f.f()(u1, u2))))
 }
 
-fn emit_edge_constraint_not(arg: &Expr) -> Box<EdgeConstraint> {
+fn emit_edge_constraint_not(arg: &Expr) -> EdgeConstraint {
     let arg = emit_edge_constraint(arg);
-    Box::new(move |u1, u2| !arg(u1, u2))
+    EdgeConstraint::new(Box::new(move |u1, u2| !arg.f()(u1, u2)))
 }
 
-fn emit_edge_constraint_lt(left: &Expr, right: &Expr) -> Box<EdgeConstraint> {
+fn emit_edge_constraint_lt(left: &Expr, right: &Expr) -> EdgeConstraint {
     match (left, right) {
-        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2))) => Box::new(|u1, u2| u1 < u2),
-        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(1))) => Box::new(|u1, u2| u2 < u1),
+        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2))) => {
+            EdgeConstraint::new(Box::new(|u1, u2| u1 < u2))
+        }
+        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(1))) => {
+            EdgeConstraint::new(Box::new(|u1, u2| u2 < u1))
+        }
         (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::Num(n))) => {
             let n = *n;
-            Box::new(move |u1, _| u1 < n)
+            EdgeConstraint::new(Box::new(move |u1, _| u1 < n))
         }
         (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(1))) => {
             let n = *n;
-            Box::new(move |u1, _| n < u1)
+            EdgeConstraint::new(Box::new(move |u1, _| n < u1))
         }
         (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::Num(n))) => {
             let n = *n;
-            Box::new(move |_, u2| u2 < n)
+            EdgeConstraint::new(Box::new(move |_, u2| u2 < n))
         }
         (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(2))) => {
             let n = *n;
-            Box::new(move |_, u2| n < u2)
+            EdgeConstraint::new(Box::new(move |_, u2| n < u2))
         }
         _ => panic!("Invalid edge constraint LT"),
     }
 }
 
-fn emit_edge_constraint_ge(left: &Expr, right: &Expr) -> Box<EdgeConstraint> {
+fn emit_edge_constraint_ge(left: &Expr, right: &Expr) -> EdgeConstraint {
     match (left, right) {
-        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2))) => Box::new(|u1, u2| u1 >= u2),
-        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(1))) => Box::new(|u1, u2| u2 >= u1),
+        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2))) => {
+            EdgeConstraint::new(Box::new(|u1, u2| u1 >= u2))
+        }
+        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(1))) => {
+            EdgeConstraint::new(Box::new(|u1, u2| u2 >= u1))
+        }
         (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::Num(n))) => {
             let n = *n;
-            Box::new(move |u1, _| u1 >= n)
+            EdgeConstraint::new(Box::new(move |u1, _| u1 >= n))
         }
         (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(1))) => {
             let n = *n;
-            Box::new(move |u1, _| n >= u1)
+            EdgeConstraint::new(Box::new(move |u1, _| n >= u1))
         }
         (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::Num(n))) => {
             let n = *n;
-            Box::new(move |_, u2| u2 >= n)
+            EdgeConstraint::new(Box::new(move |_, u2| u2 >= n))
         }
         (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(2))) => {
             let n = *n;
-            Box::new(move |_, u2| n >= u2)
+            EdgeConstraint::new(Box::new(move |_, u2| n >= u2))
         }
         _ => panic!("Invalid edge constraint GE"),
     }
 }
 
-fn emit_edge_constraint(expr: &Expr) -> Box<EdgeConstraint> {
+fn emit_edge_constraint(expr: &Expr) -> EdgeConstraint {
     match expr {
         Expr::Constant(_) => panic!("Edge constraint should not be Constant"),
         Expr::Application(fun, args) => {
@@ -237,9 +245,9 @@ fn emit_edge_constraint(expr: &Expr) -> Box<EdgeConstraint> {
     }
 }
 
-fn emit_flip_edge_constraint(expr: &Expr) -> Box<EdgeConstraint> {
+fn emit_flip_edge_constraint(expr: &Expr) -> EdgeConstraint {
     let f = emit_edge_constraint(expr);
-    Box::new(move |u2, u1| f(u1, u2))
+    EdgeConstraint::new(Box::new(move |u2, u1| f.f()(u1, u2)))
 }
 
 /// Splits the constraints into `(vertex constraints, edge constraints, global constraints)`.
@@ -307,7 +315,7 @@ pub fn split_constraints(
 }
 
 pub struct VertexConstraintsInfo {
-    constraints: Vec<Box<VertexConstraint>>,
+    constraints: Vec<VertexConstraint>,
     vid_offsets: Vec<(VId, usize)>,
 }
 
@@ -328,7 +336,7 @@ impl VertexConstraintsInfo {
 
 // private methods
 impl VertexConstraintsInfo {
-    fn new(constraints: Vec<Box<VertexConstraint>>, vid_offsets: Vec<(VId, usize)>) -> Self {
+    fn new(constraints: Vec<VertexConstraint>, vid_offsets: Vec<(VId, usize)>) -> Self {
         Self {
             constraints,
             vid_offsets,
@@ -361,7 +369,7 @@ pub fn generate_vertex_constraints(vid_exprs: &HashMap<VId, Expr>) -> VertexCons
 }
 
 pub struct EdgeConstraintsInfo {
-    constraints: Vec<(Box<EdgeConstraint>, Box<EdgeConstraint>)>,
+    constraints: Vec<(EdgeConstraint, EdgeConstraint)>,
     edge_offsets: Vec<((VId, VId), usize)>,
 }
 
@@ -384,7 +392,7 @@ impl EdgeConstraintsInfo {
 // private methods.
 impl EdgeConstraintsInfo {
     fn new(
-        constraints: Vec<(Box<EdgeConstraint>, Box<EdgeConstraint>)>,
+        constraints: Vec<(EdgeConstraint, EdgeConstraint)>,
         edge_offsets: Vec<((VId, VId), usize)>,
     ) -> Self {
         Self {
@@ -455,17 +463,17 @@ mod tests {
     fn test_emit_vertex_constraint() {
         let f = emit_vertex_constraint(&expr_parse("(and (< 3 u0) (< u0 6))").unwrap());
         assert_eq!(
-            vec![3, 4, 5, 6].into_iter().map(f).collect::<Vec<_>>(),
+            vec![3, 4, 5, 6].into_iter().map(f.f()).collect::<Vec<_>>(),
             vec![false, true, true, false]
         );
         let f = emit_vertex_constraint(&expr_parse("(not (and (< 3 u0) (< u0 6)))").unwrap());
         assert_eq!(
-            vec![3, 4, 5, 6].into_iter().map(f).collect::<Vec<_>>(),
+            vec![3, 4, 5, 6].into_iter().map(f.f()).collect::<Vec<_>>(),
             vec![true, false, false, true]
         );
         let f = emit_vertex_constraint(&expr_parse("(or (not (< 3 u0)) (>= u0 6))").unwrap());
         assert_eq!(
-            vec![3, 4, 5, 6].into_iter().map(f).collect::<Vec<_>>(),
+            vec![3, 4, 5, 6].into_iter().map(f.f()).collect::<Vec<_>>(),
             vec![true, false, false, true]
         );
     }
@@ -476,7 +484,7 @@ mod tests {
         assert_eq!(
             vec![(3, 4), (4, 4), (4, 5), (5, 4)]
                 .into_iter()
-                .map(|(u1, u2)| f(u1, u2))
+                .map(|(u1, u2)| f.f()(u1, u2))
                 .collect::<Vec<_>>(),
             vec![false, false, true, false]
         );
@@ -484,7 +492,7 @@ mod tests {
         assert_eq!(
             vec![(3, 4), (4, 4), (4, 5), (5, 4)]
                 .into_iter()
-                .map(|(u1, u2)| f(u1, u2))
+                .map(|(u1, u2)| f.f()(u1, u2))
                 .collect::<Vec<_>>(),
             vec![true, false, true, false]
         );
@@ -492,7 +500,7 @@ mod tests {
         assert_eq!(
             vec![(3, 4), (4, 4), (4, 5), (5, 4)]
                 .into_iter()
-                .map(|(u1, u2)| f(u1, u2))
+                .map(|(u1, u2)| f.f()(u1, u2))
                 .collect::<Vec<_>>(),
             vec![false, true, false, true]
         );
@@ -500,7 +508,7 @@ mod tests {
         assert_eq!(
             vec![(3, 4), (4, 4), (4, 5), (5, 4)]
                 .into_iter()
-                .map(|(u1, u2)| f(u1, u2))
+                .map(|(u1, u2)| f.f()(u1, u2))
                 .collect::<Vec<_>>(),
             vec![true, true, false, true]
         );
@@ -512,7 +520,7 @@ mod tests {
         assert_eq!(
             vec![(1, 2), (2, 2), (3, 2)]
                 .into_iter()
-                .map(|(u1, u2)| f(u2, u1))
+                .map(|(u1, u2)| f.f()(u2, u1))
                 .collect::<Vec<_>>(),
             vec![true, false, false]
         );

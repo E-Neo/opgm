@@ -124,7 +124,7 @@ impl<'a> DataVertex<'a> {
 
     /// Returns an iterator visiting the neighbors
     /// (grouped by [`VLabel`](../types/type.VLabel.html)) of the data vertex.
-    pub fn vlabels(&self) -> DataVLabelNeighborIter {
+    pub fn vlabels(&self) -> DataVLabelNeighborIter<'a> {
         DataVLabelNeighborIter::new(self.mm, self.pos)
     }
 }
@@ -344,8 +344,17 @@ mod tests {
     #[test]
     fn test_neighbor_elabels() {
         let data_graph = create_star();
-        let v1 = data_graph.vertices(1).1.next().unwrap();
-        let n3 = v1.vlabels().next().unwrap().2.next().unwrap();
+        let n3 = data_graph
+            .vertices(1)
+            .1
+            .next()
+            .unwrap()
+            .vlabels()
+            .next()
+            .unwrap()
+            .2
+            .next()
+            .unwrap();
         assert_eq!(n3.n_to_v_elabels(), [1]);
         assert_eq!(n3.v_to_n_elabels(), [1, 2, 3]);
     }

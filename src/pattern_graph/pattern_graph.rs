@@ -1,14 +1,12 @@
 use crate::types::{ELabel, EdgeConstraint, VId, VLabel, VertexConstraint};
-use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::collections::{BTreeSet, HashMap};
 
 /// The neighbor's information of a vertex.
 ///
 /// It stores the connection detail between a vertex and the neighbor of the vertex.
 /// Neighbors with the same [`NeighborInfo`](struct.NeighborInfo.html) construct the
 /// neighborhood equivalence class.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NeighborInfo<'a> {
     vlabel: VLabel,
     n_to_v_arcs: BTreeSet<ELabel>,
@@ -16,7 +14,6 @@ pub struct NeighborInfo<'a> {
     undirected_edges: BTreeSet<ELabel>,
     neighbor_constraint: Option<&'a VertexConstraint>,
     edge_constraint: Option<&'a EdgeConstraint>,
-    hash: u64,
 }
 
 impl<'a> NeighborInfo<'a> {
@@ -55,23 +52,19 @@ impl<'a> NeighborInfo<'a> {
             undirected_edges: BTreeSet::new(),
             neighbor_constraint: None,
             edge_constraint: None,
-            hash: vlabel as u64,
         }
     }
 
     fn add_predecessor(&mut self, elabel: ELabel) {
         self.n_to_v_arcs.insert(elabel);
-        self.hash += (elabel as u64) << 8;
     }
 
     fn add_successor(&mut self, elabel: ELabel) {
         self.v_to_n_arcs.insert(elabel);
-        self.hash += (elabel as u64) << 16;
     }
 
     fn add_neighbor(&mut self, elabel: ELabel) {
         self.undirected_edges.insert(elabel);
-        self.hash += (elabel as u64) << 32;
     }
 
     fn set_neighbor_constraint(&mut self, constraint: Option<&'a VertexConstraint>) {
@@ -80,40 +73,6 @@ impl<'a> NeighborInfo<'a> {
 
     fn set_edge_constraint(&mut self, constraint: Option<&'a EdgeConstraint>) {
         self.edge_constraint = constraint;
-    }
-}
-
-impl<'a> std::fmt::Debug for NeighborInfo<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NeighborInfo {{...}}")
-    }
-}
-
-impl<'a> PartialEq for NeighborInfo<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
-            && self.vlabel == other.vlabel
-            && self.n_to_v_arcs == other.n_to_v_arcs
-            && self.v_to_n_arcs == other.v_to_n_arcs
-            && self.undirected_edges == other.undirected_edges
-            && match (self.neighbor_constraint, other.neighbor_constraint) {
-                (Some(f), Some(g)) => std::ptr::eq(f, g),
-                (None, None) => true,
-                _ => false,
-            }
-            && match (self.edge_constraint, other.edge_constraint) {
-                (Some(f), Some(g)) => std::ptr::eq(f, g),
-                (None, None) => true,
-                _ => false,
-            }
-    }
-}
-
-impl<'a> Eq for NeighborInfo<'a> {}
-
-impl<'a> Hash for NeighborInfo<'a> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.hash.hash(state);
     }
 }
 
@@ -534,8 +493,11 @@ mod tests {
 
     #[test]
     fn test_vertex_constraint() {
-        let f = |u| u <= 10;
-        let (f0n, fn0) = (|u0, un| u0 < un, |un, u0| u0 < un);
+        let f = VertexConstraint::new(Box::new(|u| u <= 10));
+        let (f0n, fn0) = (
+            EdgeConstraint::new(Box::new(|u0, un| u0 < un)),
+            EdgeConstraint::new(Box::new(|un, u0| u0 < un)),
+        );
         let mut g = PatternGraph::new();
         g.add_vertex(0, 0);
         g.add_vertex(1, 1);
@@ -550,13 +512,16 @@ mod tests {
             g.neighbors(0).unwrap().get(&1).unwrap(),
             g.neighbors(0).unwrap().get(&2).unwrap()
         );
-        assert_eq!(g.vertex_constraint(1).unwrap().unwrap()(10), true);
-        assert_eq!(g.vertex_constraint(2).unwrap().unwrap()(11), false);
+        assert_eq!(g.vertex_constraint(1).unwrap().unwrap().f()(10), true);
+        assert_eq!(g.vertex_constraint(2).unwrap().unwrap().f()(11), false);
     }
 
     #[test]
     fn test_edge_constraint() {
-        let (f12, f21) = (|u1, u2| u1 < u2, |u2, u1| u1 < u2);
+        let (f12, f21) = (
+            EdgeConstraint::new(Box::new(|u1, u2| u1 < u2)),
+            EdgeConstraint::new(Box::new(|u2, u1| u1 < u2)),
+        );
         let mut g = PatternGraph::new();
         g.add_vertex(0, 0);
         g.add_vertex(1, 1);
@@ -565,10 +530,10 @@ mod tests {
         g.add_edge(1, 2, 10);
         assert_eq!(g.add_edge_constraint(1, 2, Some((&f12, &f21))), true);
         assert_eq!(g.add_edge_constraint(0, 2, Some((&f12, &f21))), false);
-        assert_eq!(g.edge_constraint(1, 2).unwrap().unwrap()(1, 2), true);
-        assert_eq!(g.edge_constraint(1, 2).unwrap().unwrap()(2, 1), false);
-        assert_eq!(g.edge_constraint(2, 1).unwrap().unwrap()(2, 1), true);
-        assert_eq!(g.edge_constraint(2, 1).unwrap().unwrap()(1, 2), false);
+        assert_eq!(g.edge_constraint(1, 2).unwrap().unwrap().f()(1, 2), true);
+        assert_eq!(g.edge_constraint(1, 2).unwrap().unwrap().f()(2, 1), false);
+        assert_eq!(g.edge_constraint(2, 1).unwrap().unwrap().f()(2, 1), true);
+        assert_eq!(g.edge_constraint(2, 1).unwrap().unwrap().f()(1, 2), false);
     }
 
     #[test]
@@ -591,17 +556,16 @@ mod tests {
 
     #[test]
     fn test_constraint() {
-        fn lt_vid_num(n: i64) -> Box<dyn Fn(VId) -> bool> {
-            Box::new(move |vid| vid < n)
+        fn lt_vid_num(n: i64) -> VertexConstraint {
+            VertexConstraint::new(Box::new(move |vid| vid < n))
         }
-        let vertex_constraints: HashMap<VId, Box<dyn Fn(VId) -> bool>> =
-            vec![(1, lt_vid_num(10))].into_iter().collect();
+        let vertex_constraints: HashMap<_, _> = vec![(1, lt_vid_num(10))].into_iter().collect();
         let mut p = PatternGraph::new();
         p.add_vertex(1, 0);
         p.add_vertex(2, 0);
         p.add_edge(1, 2, 0);
-        p.add_vertex_constraint(1, vertex_constraints.get(&1).map(|f| &**f));
-        assert_eq!(p.vertex_constraint(1).unwrap().unwrap()(9), true);
-        assert_eq!(p.vertex_constraint(1).unwrap().unwrap()(10), false);
+        p.add_vertex_constraint(1, vertex_constraints.get(&1));
+        assert_eq!(p.vertex_constraint(1).unwrap().unwrap().f()(9), true);
+        assert_eq!(p.vertex_constraint(1).unwrap().unwrap().f()(10), false);
     }
 }

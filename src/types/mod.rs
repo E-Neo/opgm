@@ -1,5 +1,9 @@
 //! Various types related to graph matching.
 
+pub use constraints::{EdgeConstraint, VertexConstraint};
+
+mod constraints;
+
 /// The vertex id type.
 pub type VId = i64;
 
@@ -50,12 +54,3 @@ pub(crate) struct VIdPos {
     pub vid: VId,
     pub pos: usize,
 }
-
-/// Vertex constraint type.
-pub type VertexConstraint = dyn Fn(VId) -> bool;
-
-/// Edge constraint type.
-pub type EdgeConstraint = dyn Fn(VId, VId) -> bool;
-
-/// Global constraint type.
-pub type GlobalConstraint = dyn Fn(&[VId]) -> bool;
