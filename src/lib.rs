@@ -2,6 +2,7 @@
 
 pub mod compiler;
 pub mod data_graph;
+pub mod executor;
 pub mod memory_manager;
 pub mod pattern_graph;
 pub mod planner;
