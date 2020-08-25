@@ -1,6 +1,6 @@
 //! Various types related to graph matching.
 
-pub use constraints::{EdgeConstraint, VertexConstraint};
+pub use constraints::{EdgeConstraint, GlobalConstraint, VertexConstraint};
 
 mod constraints;
 

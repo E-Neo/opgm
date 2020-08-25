@@ -101,3 +101,63 @@ impl Hash for EdgeConstraint {
         (self.f.as_ref() as *const _ as *const u8 as usize).hash(state);
     }
 }
+
+pub struct GlobalConstraint {
+    f: Box<dyn Fn(&[VId]) -> bool>,
+}
+
+impl GlobalConstraint {
+    pub fn new(f: Box<dyn Fn(&[VId]) -> bool>) -> Self {
+        Self { f }
+    }
+
+    pub fn f(&self) -> &dyn Fn(&[VId]) -> bool {
+        self.f.as_ref()
+    }
+}
+
+impl std::fmt::Debug for GlobalConstraint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GlobalConstraint({:p})", self.f)
+    }
+}
+
+impl PartialEq for GlobalConstraint {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.f.as_ref() as *const _, other.f.as_ref() as *const _)
+    }
+}
+
+impl Eq for GlobalConstraint {}
+
+impl PartialOrd for GlobalConstraint {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (self.f.as_ref() as *const _ as *const u8 as usize)
+            .partial_cmp(&(other.f.as_ref() as *const _ as *const u8 as usize))
+    }
+}
+
+impl Ord for GlobalConstraint {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.f.as_ref() as *const _ as *const u8 as usize)
+            .cmp(&(other.f.as_ref() as *const _ as *const u8 as usize))
+    }
+}
+
+impl Hash for GlobalConstraint {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (self.f.as_ref() as *const _ as *const u8 as usize).hash(state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_global_constraint() {
+        let gc = GlobalConstraint::new(Box::new(|vs| vs[0] < vs[1] && vs[1] < vs[2]));
+        assert_eq!(gc.f()(&[1, 2, 3]), true);
+        assert_eq!(gc.f()(&[1, 3, 2]), false);
+    }
+}
