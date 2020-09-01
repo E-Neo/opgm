@@ -36,12 +36,11 @@ impl MmapFile {
 
     pub fn resize(&mut self, new_len: usize) {
         self.len = new_len as u64;
+        self.mmap = MmapMut::map_anon(1).unwrap();
         self.file.set_len(self.len).unwrap();
-        self.mmap = if new_len == 0 {
-            MmapMut::map_anon(1).unwrap()
-        } else {
-            unsafe { MmapMut::map_mut(&self.file).unwrap() }
-        };
+        if new_len != 0 {
+            self.mmap = unsafe { MmapMut::map_mut(&self.file).unwrap() }
+        }
     }
 
     pub fn as_ptr(&self) -> *const u8 {
