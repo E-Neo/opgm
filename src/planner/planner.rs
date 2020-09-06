@@ -3,7 +3,6 @@
 use crate::{
     compiler::ast::Expr,
     data_graph::DataGraph,
-    executor::match_characteristics,
     memory_manager::{MemoryManager, MmapFile},
     pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
     planner::decompose_stars,
@@ -11,7 +10,6 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
-use std::rc::Rc;
 
 pub enum MemoryManagerType {
     Mem,
@@ -156,18 +154,18 @@ impl<'a, 'b> CharacteristicInfo<'a, 'b> {
 
 // private methods.
 impl<'a, 'b> CharacteristicInfo<'a, 'b> {
-    fn new(characteristic: Characteristic<'a, 'b>, id: usize) -> Self {
+    pub(crate) fn new(characteristic: Characteristic<'a, 'b>, id: usize) -> Self {
         let mut nlabel_ninfo_eqv: BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize)>> =
             BTreeMap::new();
         characteristic
             .infos()
             .iter()
             .enumerate()
-            .for_each(|(eqv, &ninfo)| {
+            .for_each(|(i, &ninfo)| {
                 nlabel_ninfo_eqv
                     .entry(ninfo.vlabel())
                     .or_default()
-                    .push((ninfo, eqv));
+                    .push((ninfo, i + 1));
             });
         Self {
             id,
