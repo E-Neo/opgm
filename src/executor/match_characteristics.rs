@@ -452,6 +452,76 @@ mod tests {
     use crate::{data_graph::mm_read_iter, pattern_graph::PatternGraph};
     use std::collections::HashSet;
 
+    fn create_super_row_mm(num_eqvs: usize, num_cover: usize) -> MemoryManager {
+        let mut mm = MemoryManager::Mem(vec![]);
+        mm.resize(size_of::<SuperRowHeader>());
+        mm.write(
+            0,
+            &SuperRowHeader {
+                num_rows: 0,
+                num_eqvs,
+                num_cover,
+            } as *const _,
+            1,
+        );
+        mm
+    }
+
+    fn add_super_row(
+        super_row_mm: &mut MemoryManager,
+        index_mm: &mut MemoryManager,
+        bounds: &[usize],
+        imgs: &[&[VId]],
+    ) {
+        let sr_header = super_row_mm.read::<SuperRowHeader>(0);
+        let (num_rows, num_eqvs, num_cover) = unsafe {
+            (
+                (*sr_header).num_rows,
+                (*sr_header).num_eqvs,
+                (*sr_header).num_cover,
+            )
+        };
+        let sr_pos = super_row_mm.len();
+        let new_sr_pos = sr_pos
+            + size_of::<usize>()
+            + num_eqvs * size_of::<PosLen>()
+            + bounds.iter().sum::<usize>() * size_of::<VId>();
+        super_row_mm.resize(new_sr_pos);
+        super_row_mm.write(sr_pos, &(new_sr_pos - sr_pos) as *const _, 1);
+        let idx_pos = index_mm.len();
+        index_mm.resize(idx_pos + size_of::<VIdPos>());
+        let mut pos = sr_pos + size_of::<usize>() + num_eqvs * size_of::<PosLen>();
+        index_mm.write(
+            idx_pos,
+            &VIdPos {
+                vid: *imgs.get(0).unwrap().get(0).unwrap(),
+                pos: sr_pos,
+            },
+            1,
+        );
+        for (eqv, (&bound, &img)) in bounds.iter().zip(imgs).enumerate() {
+            super_row_mm.write(
+                sr_pos + size_of::<usize>() + eqv * size_of::<PosLen>(),
+                &PosLen {
+                    pos,
+                    len: img.len(),
+                } as *const _,
+                1,
+            );
+            super_row_mm.write(pos, img.as_ptr(), img.len());
+            pos += bound * size_of::<VId>();
+        }
+        super_row_mm.write(
+            0,
+            &SuperRowHeader {
+                num_rows: num_rows + 1,
+                num_eqvs,
+                num_cover,
+            } as *const _,
+            1,
+        );
+    }
+
     fn create_stars() -> DataGraph {
         let mut mm = MemoryManager::Mem(vec![]);
         let vertices = vec![
@@ -499,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn test_index() {
+    fn test_super_row_index() {
         let data_graph = create_stars();
         let pattern_graph = create_pattern_graph();
         let infos = vec![
@@ -516,15 +586,53 @@ mod tests {
             super_row_mms.as_mut_slice(),
             index_mms.as_mut_slice(),
         );
-        let vids: Vec<Vec<VId>> = index_mms
-            .iter()
-            .map(|mm| {
-                mm.read_slice::<VIdPos>(0, 2)
-                    .iter()
-                    .map(|vid_pos| vid_pos.vid)
-                    .collect()
-            })
-            .collect();
-        assert_eq!(vids, vec![vec![1, 5], vec![1, 5]]);
+        let mut super_row_mm0 = create_super_row_mm(3, 1);
+        let mut index_mm0 = MemoryManager::Mem(vec![]);
+        add_super_row(
+            &mut super_row_mm0,
+            &mut index_mm0,
+            &[1, 2, 1],
+            &[&[1], &[2, 3], &[4]],
+        );
+        add_super_row(
+            &mut super_row_mm0,
+            &mut index_mm0,
+            &[1, 2, 1],
+            &[&[5], &[6, 7], &[8]],
+        );
+        let mut super_row_mm1 = create_super_row_mm(2, 1);
+        let mut index_mm1 = MemoryManager::Mem(vec![]);
+        add_super_row(
+            &mut super_row_mm1,
+            &mut index_mm1,
+            &[1, 2],
+            &[&[1], &[2, 3]],
+        );
+        add_super_row(
+            &mut super_row_mm1,
+            &mut index_mm1,
+            &[1, 2],
+            &[&[5], &[6, 7]],
+        );
+        assert_eq!(
+            super_row_mms
+                .iter()
+                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
+                .collect::<Vec<_>>(),
+            vec![super_row_mm0, super_row_mm1]
+                .iter()
+                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            index_mms
+                .iter()
+                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
+                .collect::<Vec<_>>(),
+            vec![index_mm0, index_mm1]
+                .iter()
+                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
+                .collect::<Vec<_>>()
+        );
     }
 }
