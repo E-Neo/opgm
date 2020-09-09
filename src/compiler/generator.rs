@@ -3,7 +3,7 @@
 use crate::{
     compiler::ast::{Ast, Atom, BuiltIn, Expr},
     pattern_graph::PatternGraph,
-    types::{EdgeConstraint, VId, VertexConstraint},
+    types::{EdgeConstraint, GlobalConstraint, VId, VertexConstraint},
 };
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
@@ -64,6 +64,8 @@ fn extract_vertices(expr: &Expr) -> HashSet<VId> {
 }
 
 /// Renames the `VId` in the `expr`.
+///
+/// For every key-value pair in `rules`, the key is the old `VId` and the value is the new one.
 pub fn rename_vid(expr: &mut Expr, rules: &HashMap<VId, VId>) {
     match expr {
         Expr::Constant(atom) => {
@@ -250,10 +252,102 @@ fn emit_flip_edge_constraint(expr: &Expr) -> EdgeConstraint {
     EdgeConstraint::new(Box::new(move |u2, u1| f.f()(u1, u2)))
 }
 
+fn emit_global_constraint_and(args: &[Expr]) -> GlobalConstraint {
+    let args: Vec<_> = args.iter().map(emit_global_constraint).collect();
+    GlobalConstraint::new(Box::new(move |eqvs| args.iter().all(|f| f.f()(eqvs))))
+}
+
+fn emit_global_constraint_or(args: &[Expr]) -> GlobalConstraint {
+    let args: Vec<_> = args.iter().map(emit_global_constraint).collect();
+    GlobalConstraint::new(Box::new(move |eqvs| args.iter().any(|f| f.f()(eqvs))))
+}
+
+fn emit_global_constraint_not(arg: &Expr) -> GlobalConstraint {
+    let arg = emit_global_constraint(arg);
+    GlobalConstraint::new(Box::new(move |eqvs| !arg.f()(eqvs)))
+}
+
+fn emit_global_constraint_lt(left: &Expr, right: &Expr) -> GlobalConstraint {
+    match (left, right) {
+        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::VId(r))) => {
+            let (l, r) = (*l as usize, *r as usize);
+            GlobalConstraint::new(Box::new(move |eqvs| unsafe {
+                eqvs.get_unchecked(l) < eqvs.get_unchecked(r)
+            }))
+        }
+        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::Num(n))) => {
+            let (l, n) = (*l as usize, *n);
+            GlobalConstraint::new(Box::new(move |eqvs| *unsafe { eqvs.get_unchecked(l) } < n))
+        }
+        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(r))) => {
+            let (n, r) = (*n, *r as usize);
+            GlobalConstraint::new(Box::new(move |eqvs| n < *unsafe { eqvs.get_unchecked(r) }))
+        }
+        _ => panic!("Invalid global constraint (LT {:?} {:?})", left, right),
+    }
+}
+
+fn emit_global_constraint_ge(left: &Expr, right: &Expr) -> GlobalConstraint {
+    match (left, right) {
+        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::VId(r))) => {
+            let (l, r) = (*l as usize, *r as usize);
+            GlobalConstraint::new(Box::new(move |eqvs| unsafe {
+                eqvs.get_unchecked(l) >= eqvs.get_unchecked(r)
+            }))
+        }
+        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::Num(n))) => {
+            let (l, n) = (*l as usize, *n);
+            GlobalConstraint::new(Box::new(move |eqvs| *unsafe { eqvs.get_unchecked(l) } >= n))
+        }
+        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(r))) => {
+            let (n, r) = (*n, *r as usize);
+            GlobalConstraint::new(Box::new(move |eqvs| n >= *unsafe { eqvs.get_unchecked(r) }))
+        }
+        _ => panic!("Invalid global constraint (LT {:?} {:?})", left, right),
+    }
+}
+
+fn emit_global_constraint(expr: &Expr) -> GlobalConstraint {
+    match expr {
+        Expr::Constant(_) => panic!("Global constraint should not be Constant"),
+        Expr::Application(fun, args) => {
+            if let Expr::Constant(Atom::BuiltIn(builtin)) = &**fun {
+                match builtin {
+                    BuiltIn::And => emit_global_constraint_and(args),
+                    BuiltIn::Or => emit_global_constraint_or(args),
+                    BuiltIn::Not => emit_global_constraint_not(&args[0]),
+                    BuiltIn::LT => emit_global_constraint_lt(&args[0], &args[1]),
+                    BuiltIn::GE => emit_global_constraint_ge(&args[0], &args[1]),
+                }
+            } else {
+                panic!("Invalid application: {:?}", &**fun)
+            }
+        }
+    }
+}
+
+/// Compile the global constraint.
+///
+/// This function will not check whether `expr` is a valid global constraint,
+/// be careful to call this function.
+pub unsafe fn compile_global_constraint(
+    expr: &Expr,
+    vertex_eqv: &HashMap<VId, usize>,
+) -> GlobalConstraint {
+    let rules: HashMap<VId, VId> = vertex_eqv
+        .iter()
+        .map(|(&vid, &eqv)| (vid, eqv as VId))
+        .collect();
+    let mut expr = expr.clone();
+    rename_vid(&mut expr, &rules);
+    emit_global_constraint(&expr)
+}
+
 /// Splits the constraints into `(vertex constraints, edge constraints, global constraints)`.
 ///
-/// For vertex constraints, the vertex ID will be rename to 0.
+/// For vertex constraints, the vertex ID is renamed to 0.
 /// For edges constraints, the key is a sorted pair and is renamed to (1, 2).
+/// The global constraints are not renamed.
 pub fn split_constraints(
     edges: &Edges,
     exprs: Vec<Expr>,
@@ -523,6 +617,23 @@ mod tests {
                 .map(|(u1, u2)| f.f()(u2, u1))
                 .collect::<Vec<_>>(),
             vec![true, false, false]
+        );
+    }
+
+    #[test]
+    fn test_compile_global_constraint() {
+        let f = unsafe {
+            compile_global_constraint(
+                &expr_parse("(or (< u1 u2) (< u1 u3))").unwrap(),
+                &vec![(1, 0), (2, 1), (3, 2)].into_iter().collect(),
+            )
+        };
+        assert_eq!(
+            [&[1 as VId, 2, 3], &[2, 3, 1], &[3, 1, 2], &[3, 2, 1]]
+                .iter()
+                .map(|&eqvs| f.f()(eqvs))
+                .collect::<Vec<_>>(),
+            vec![true, true, false, false]
         );
     }
 
