@@ -57,7 +57,7 @@ fn extract_vertices_aux(expr: &Expr, vertices: &mut HashSet<VId>) {
 }
 
 /// Extracts vertices from an `expr`.
-fn extract_vertices(expr: &Expr) -> HashSet<VId> {
+pub fn extract_vertices(expr: &Expr) -> HashSet<VId> {
     let mut vertices = HashSet::new();
     extract_vertices_aux(expr, &mut vertices);
     vertices
@@ -327,20 +327,28 @@ fn emit_global_constraint(expr: &Expr) -> GlobalConstraint {
 }
 
 /// Compile the global constraint.
-///
-/// This function will not check whether `expr` is a valid global constraint,
-/// be careful to call this function.
-pub unsafe fn compile_global_constraint(
-    expr: &Expr,
+pub fn compile_global_constraints(
+    gcs: &[&Expr],
     vertex_eqv: &HashMap<VId, usize>,
-) -> GlobalConstraint {
-    let rules: HashMap<VId, VId> = vertex_eqv
-        .iter()
-        .map(|(&vid, &eqv)| (vid, eqv as VId))
-        .collect();
-    let mut expr = expr.clone();
-    rename_vid(&mut expr, &rules);
-    emit_global_constraint(&expr)
+) -> Option<GlobalConstraint> {
+    if gcs.len() == 0 {
+        None
+    } else {
+        let rules: HashMap<VId, VId> = vertex_eqv
+            .iter()
+            .map(|(&vid, &eqv)| (vid, eqv as VId))
+            .collect();
+        let mut expr = if gcs.len() == 1 {
+            gcs[0].clone()
+        } else {
+            Expr::Application(
+                Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::And))),
+                gcs.iter().map(|&gc| gc.clone()).collect(),
+            )
+        };
+        rename_vid(&mut expr, &rules);
+        Some(emit_global_constraint(&expr))
+    }
 }
 
 /// Splits the constraints into `(vertex constraints, edge constraints, global constraints)`.
@@ -621,17 +629,15 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_global_constraint() {
-        let f = unsafe {
-            compile_global_constraint(
-                &expr_parse("(or (< u1 u2) (< u1 u3))").unwrap(),
-                &vec![(1, 0), (2, 1), (3, 2)].into_iter().collect(),
-            )
-        };
+    fn test_compile_global_constraints() {
+        let f = compile_global_constraints(
+            &[&expr_parse("(or (< u1 u2) (< u1 u3))").unwrap()],
+            &vec![(1, 0), (2, 1), (3, 2)].into_iter().collect(),
+        );
         assert_eq!(
             [&[1 as VId, 2, 3], &[2, 3, 1], &[3, 1, 2], &[3, 2, 1]]
                 .iter()
-                .map(|&eqvs| f.f()(eqvs))
+                .map(|&eqvs| f.as_ref().unwrap().f()(eqvs))
                 .collect::<Vec<_>>(),
             vec![true, true, false, false]
         );

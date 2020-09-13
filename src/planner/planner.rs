@@ -1,7 +1,10 @@
 //! The planner.
 
 use crate::{
-    compiler::ast::Expr,
+    compiler::{
+        ast::Expr,
+        generator::{compile_global_constraints, extract_vertices},
+    },
     data_graph::DataGraph,
     memory_manager::{MemoryManager, MmapFile},
     pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
@@ -55,7 +58,11 @@ impl<'a, 'b> Planner<'a, 'b> {
         let characteristic_ids = self.create_characteristic_ids(&roots);
         let stars = self.create_stars(&roots, &characteristic_ids);
         let stars_plan = self.create_stars_plan(&characteristic_ids);
-        let join_plan = self.create_join_plan(&stars, characteristic_ids.len());
+        let join_plan = self.create_join_plan(
+            &stars,
+            characteristic_ids.len(),
+            self.global_constraints.as_slice(),
+        );
         Plan {
             data_graph: self.data_graph,
             pattern_graph: self.pattern_graph,
@@ -122,11 +129,48 @@ impl<'a, 'b> Planner<'a, 'b> {
             .collect()
     }
 
-    fn create_join_plan(&self, stars: &[StarInfo], id: usize) -> Vec<JoinInfo> {
+    fn create_join_plan(
+        &self,
+        stars: &[StarInfo],
+        mut id: usize,
+        global_constraints: &[Expr],
+    ) -> Vec<JoinInfo> {
         if stars.len() < 2 {
             vec![]
         } else {
-            vec![JoinInfo::new(&stars[0], &stars[1], id)]
+            let mut join_infos = vec![JoinInfo::new(&stars[0], &stars[1], id)];
+            id += 1;
+            for right in stars.iter().skip(2) {
+                join_infos.push(JoinInfo::new(join_infos.last().unwrap(), right, id));
+                id += 1;
+            }
+            let mut gc_verticeses: Vec<(&Expr, HashSet<VId>)> = global_constraints
+                .iter()
+                .map(|gc| (gc, extract_vertices(gc)))
+                .collect();
+            for info in join_infos.iter_mut() {
+                let info_vertices: HashSet<VId> = info.vertex_eqv().keys().map(|&x| x).collect();
+                let info_cover: HashSet<VId> = info.vertex_cover().iter().map(|&x| x).collect();
+                let mut info_gcs = Vec::with_capacity(global_constraints.len());
+                gc_verticeses =
+                    gc_verticeses
+                        .into_iter()
+                        .fold(vec![], |mut gcvs, (gc, gc_vertices)| {
+                            if gc_vertices.is_subset(&info_vertices)
+                                && gc_vertices.difference(&info_cover).count() <= 1
+                            {
+                                info_gcs.push(gc);
+                            } else {
+                                gcvs.push((gc, gc_vertices));
+                            }
+                            gcvs
+                        });
+                info.set_global_constraint(compile_global_constraints(
+                    info_gcs.as_slice(),
+                    info.vertex_eqv(),
+                ));
+            }
+            join_infos
         }
     }
 }
@@ -178,6 +222,7 @@ impl<'a, 'b> CharacteristicInfo<'a, 'b> {
 #[derive(Debug, PartialEq)]
 pub struct StarInfo<'a, 'b> {
     root: VId,
+    vertex_cover: Vec<VId>,
     characteristic_info: CharacteristicInfo<'a, 'b>,
     vertex_eqv: HashMap<VId, usize>,
 }
@@ -218,8 +263,50 @@ impl<'a, 'b> StarInfo<'a, 'b> {
         Self {
             root,
             vertex_eqv,
+            vertex_cover: vec![root],
             characteristic_info: CharacteristicInfo::new(characteristic, id),
         }
+    }
+
+    fn vertex_cover(&self) -> &[VId] {
+        self.vertex_cover.as_slice()
+    }
+}
+
+/// The `JoinableInfo` can be binary joined by a `StarInfo`.
+pub trait JoinableInfo {
+    fn id(&self) -> usize;
+
+    fn vertex_cover(&self) -> &[VId];
+
+    fn vertex_eqv(&self) -> &HashMap<VId, usize>;
+}
+
+impl<'a, 'b> JoinableInfo for StarInfo<'a, 'b> {
+    fn id(&self) -> usize {
+        self.id()
+    }
+
+    fn vertex_cover(&self) -> &[VId] {
+        self.vertex_cover()
+    }
+
+    fn vertex_eqv(&self) -> &HashMap<VId, usize> {
+        self.vertex_eqv()
+    }
+}
+
+impl JoinableInfo for JoinInfo {
+    fn id(&self) -> usize {
+        self.id()
+    }
+
+    fn vertex_cover(&self) -> &[VId] {
+        self.vertex_cover()
+    }
+
+    fn vertex_eqv(&self) -> &HashMap<VId, usize> {
+        self.vertex_eqv()
     }
 }
 
@@ -229,6 +316,7 @@ pub struct JoinInfo {
     left_id: usize,
     right_id: usize,
     vertex_cover: Vec<VId>,
+    num_eqv: usize,
     vertex_eqv: HashMap<VId, usize>,
     global_constraint: Option<GlobalConstraint>,
     indexed_intersection: usize,                  // left_eqv
@@ -238,16 +326,86 @@ pub struct JoinInfo {
 }
 
 impl JoinInfo {
-    fn new(left: &StarInfo, right: &StarInfo, id: usize) -> Self {
-        let (vertex_eqv, indexed_intersection, sequential_intersection, left_keep, right_keep) =
-            Self::create_eqv_intersection_keep(left, right);
+    /// The `id` of the `SuperRow` file for the join result.
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    /// The `id` of the left join operand.
+    pub fn left_id(&self) -> usize {
+        self.left_id
+    }
+
+    /// The `id` of the right join operand.
+    pub fn right_id(&self) -> usize {
+        self.right_id
+    }
+
+    /// The vertex cover of the joined graph.
+    pub fn vertex_cover(&self) -> &[VId] {
+        self.vertex_cover.as_slice()
+    }
+
+    /// Number of equivalence classes.
+    pub fn num_eqv(&self) -> usize {
+        self.num_eqv
+    }
+
+    /// The mapping from the vertex to the equivalence class id `eqv`.
+    pub fn vertex_eqv(&self) -> &HashMap<VId, usize> {
+        &self.vertex_eqv
+    }
+
+    /// The `GlobalConstraint`.
+    pub fn global_constraint(&self) -> &Option<GlobalConstraint> {
+        &self.global_constraint
+    }
+
+    /// The `left_eqv` to apply the index-based join.
+    pub fn indexed_intersection(&self) -> usize {
+        self.indexed_intersection
+    }
+
+    /// The `(left_eqv, right_eqv)` to apply the sequential set intersection.
+    pub fn sequential_intersection(&self) -> &[(usize, usize)] {
+        self.sequential_intersection.as_slice()
+    }
+
+    /// The `left_eqv` to write down directly.
+    pub fn left_keep(&self) -> &[usize] {
+        self.left_keep.as_slice()
+    }
+
+    /// The `right_eqv` to write down directly.
+    pub fn right_keep(&self) -> &[usize] {
+        self.right_keep.as_slice()
+    }
+}
+
+// private methods.
+impl JoinInfo {
+    fn new<L: JoinableInfo>(left: &L, right: &StarInfo, id: usize) -> Self {
+        let (
+            vertex_eqv,
+            num_eqv,
+            indexed_intersection,
+            sequential_intersection,
+            left_keep,
+            right_keep,
+        ) = Self::create_eqv_intersection_keep(left, right);
         Self {
             id,
             left_id: left.id(),
             right_id: right.id(),
-            vertex_cover: vec![left.root(), right.root()],
+            vertex_cover: left
+                .vertex_cover()
+                .iter()
+                .map(|&vid| vid)
+                .chain(std::iter::once(right.root()))
+                .collect(),
             vertex_eqv,
-            global_constraint: None, // TODO!!!
+            num_eqv,
+            global_constraint: None,
             indexed_intersection,
             sequential_intersection,
             left_keep,
@@ -255,11 +413,16 @@ impl JoinInfo {
         }
     }
 
-    fn create_eqv_intersection_keep(
-        left: &StarInfo,
+    fn set_global_constraint(&mut self, global_constraint: Option<GlobalConstraint>) {
+        self.global_constraint = global_constraint
+    }
+
+    fn create_eqv_intersection_keep<L: JoinableInfo>(
+        left: &L,
         right: &StarInfo,
     ) -> (
         HashMap<VId, usize>,
+        usize,
         usize,
         Vec<(usize, usize)>,
         Vec<usize>,
@@ -267,10 +430,15 @@ impl JoinInfo {
     ) {
         let left_vertices: HashSet<VId> = left.vertex_eqv().keys().map(|&x| x).collect();
         let right_vertices: HashSet<VId> = right.vertex_eqv().keys().map(|&x| x).collect();
-        let mut vertex_eqv: HashMap<VId, usize> = vec![(left.root(), 0), (right.root(), 1)]
-            .into_iter()
+        let mut vertex_eqv: HashMap<VId, usize> = left
+            .vertex_cover()
+            .iter()
+            .map(|&vid| vid)
+            .enumerate()
+            .map(|(eqv, vid)| (vid, eqv))
             .collect();
-        let mut eqv = 2;
+        vertex_eqv.insert(right.root(), vertex_eqv.len());
+        let mut eqv = vertex_eqv.len(); // eqv == vertex_eqv.len() only at this point.
         let indexed_intersection = Self::create_indexed_intersection(left, right);
         let sequential_intersection = Self::create_sequential_intersection(
             &mut vertex_eqv,
@@ -296,6 +464,7 @@ impl JoinInfo {
         );
         (
             vertex_eqv,
+            eqv,
             indexed_intersection,
             sequential_intersection,
             left_keep,
@@ -303,12 +472,12 @@ impl JoinInfo {
         )
     }
 
-    fn create_indexed_intersection(left: &StarInfo, right: &StarInfo) -> usize {
+    fn create_indexed_intersection<L: JoinableInfo>(left: &L, right: &StarInfo) -> usize {
         *left.vertex_eqv().get(&right.root()).unwrap()
     }
 
-    fn create_sequential_intersection_info(
-        left: &StarInfo,
+    fn create_sequential_intersection_info<L: JoinableInfo>(
+        left: &L,
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
@@ -317,7 +486,9 @@ impl JoinInfo {
             .intersection(&right_vertices)
             .map(|&x| x)
             .collect();
-        vertices.remove(&left.root());
+        for vid in left.vertex_cover() {
+            vertices.remove(vid);
+        }
         vertices.remove(&right.root());
         let mut info: BTreeMap<(usize, usize), Vec<VId>> = BTreeMap::new();
         for v in vertices {
@@ -331,10 +502,10 @@ impl JoinInfo {
         info
     }
 
-    fn create_sequential_intersection(
+    fn create_sequential_intersection<L: JoinableInfo>(
         vertex_eqv: &mut HashMap<VId, usize>,
         eqv: &mut usize,
-        left: &StarInfo,
+        left: &L,
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
@@ -351,8 +522,8 @@ impl JoinInfo {
             })
     }
 
-    fn create_left_keep_info(
-        left: &StarInfo,
+    fn create_left_keep_info<L: JoinableInfo>(
+        left: &L,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
     ) -> BTreeMap<usize, Vec<VId>> {
@@ -360,7 +531,9 @@ impl JoinInfo {
             .difference(&right_vertices)
             .map(|&x| x)
             .collect();
-        vertices.remove(&left.root());
+        for vid in left.vertex_cover() {
+            vertices.remove(vid);
+        }
         let mut info: BTreeMap<usize, Vec<VId>> = BTreeMap::new();
         for v in vertices {
             info.entry(*left.vertex_eqv().get(&v).unwrap())
@@ -370,10 +543,10 @@ impl JoinInfo {
         info
     }
 
-    fn create_left_keep(
+    fn create_left_keep<L: JoinableInfo>(
         vertex_eqv: &mut HashMap<VId, usize>,
         eqv: &mut usize,
-        left: &StarInfo,
+        left: &L,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
     ) -> Vec<usize> {
@@ -394,8 +567,8 @@ impl JoinInfo {
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
     ) -> BTreeMap<usize, Vec<VId>> {
-        let mut vertices: HashSet<VId> = left_vertices
-            .difference(&right_vertices)
+        let mut vertices: HashSet<VId> = right_vertices
+            .difference(&left_vertices)
             .map(|&x| x)
             .collect();
         vertices.remove(&right.root());
@@ -470,8 +643,13 @@ impl<'a, 'b> Plan<'a, 'b> {
         &self.join_plan
     }
 
-    /// Execute the plan.
-    pub fn execute(&self) {}
+    /// Returns `(super_row_mms, index_mms)`.
+    pub fn allocate(&self) -> (Vec<MemoryManager>, Vec<MemoryManager>) {
+        (
+            self.create_super_row_mms(self.super_row_mm_len),
+            self.create_index_mms(self.index_mm_len),
+        )
+    }
 }
 
 // private methods.
@@ -498,14 +676,6 @@ impl<'a, 'b> Plan<'a, 'b> {
                 MemoryManagerType::Sink => MemoryManager::Sink,
             })
             .collect()
-    }
-
-    /// Returns `(super_row_mms, index_mms)`.
-    fn allocate(&self) -> (Vec<MemoryManager>, Vec<MemoryManager>) {
-        (
-            self.create_super_row_mms(self.super_row_mm_len),
-            self.create_index_mms(self.index_mm_len),
-        )
     }
 }
 
@@ -545,6 +715,17 @@ mod tests {
         p
     }
 
+    fn create_pattern_graph1<'a>() -> PatternGraph<'a> {
+        let mut p = PatternGraph::new();
+        for (u, l) in vec![(0, 0), (1, 1), (2, 2), (3, 2)] {
+            p.add_vertex(u, l);
+        }
+        for (u1, u2, l) in vec![(0, 1, 0), (0, 2, 0), (1, 2, 0), (1, 3, 0)] {
+            p.add_edge(u1, u2, l);
+        }
+        p
+    }
+
     #[test]
     fn test_stars_plan() {
         let data_graph = create_data_graph();
@@ -560,5 +741,25 @@ mod tests {
                 )]
             )]
         );
+    }
+
+    #[test]
+    fn test_join_plan() {
+        let pattern_graph = create_pattern_graph1();
+        let star_info1 = StarInfo::new(&pattern_graph, 0, 0);
+        let star_info2 = StarInfo::new(&pattern_graph, 1, 1);
+        let join_info = JoinInfo::new(&star_info1, &star_info2, 2);
+        assert_eq!(join_info.vertex_cover(), &[0, 1]);
+        assert_eq!(join_info.num_eqv(), 4);
+        assert_eq!(
+            join_info.vertex_eqv(),
+            &vec![(0, 0), (1, 1), (2, 2), (3, 3)]
+                .into_iter()
+                .collect::<HashMap<_, _>>()
+        );
+        assert_eq!(join_info.indexed_intersection(), 1);
+        assert_eq!(join_info.sequential_intersection(), &[(2, 2)]);
+        assert_eq!(join_info.left_keep(), &[]);
+        assert_eq!(join_info.right_keep(), &[2]);
     }
 }

@@ -1,9 +1,10 @@
 use crate::{
     data_graph::{DataGraph, DataNeighbor, DataVertex},
+    executor::{write_index, write_num_bytes, write_pos_len, write_super_row_header, write_vid},
     memory_manager::MemoryManager,
-    pattern_graph::{Characteristic, NeighborInfo},
+    pattern_graph::NeighborInfo,
     planner::CharacteristicInfo,
-    types::{ELabel, PosLen, SuperRowHeader, VId, VIdPos, VLabel},
+    types::{PosLen, SuperRowHeader, VId, VIdPos, VLabel},
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -121,7 +122,6 @@ fn match_data_vertex(
                     infos,
                     super_row_mms,
                     &id_sr_pos_eqv_poses,
-                    sr_pos_idx_poses,
                 );
                 left = left_iter.next();
                 right = right_iter.next();
@@ -140,7 +140,6 @@ fn match_neighbors<'a, N>(
     infos: &[CharacteristicInfo],
     super_row_mms: &mut [MemoryManager],
     id_sr_pos_eqv_poses: &HashMap<usize, (usize, Vec<usize>)>,
-    sr_pos_eqv_poses: &[(usize, usize)],
 ) where
     N: IntoIterator<Item = DataNeighbor<'a>>,
 {
@@ -403,121 +402,38 @@ fn finish_results(
     });
 }
 
-fn write_super_row_header(
-    super_row_mm: &mut MemoryManager,
-    num_rows: usize,
-    num_eqvs: usize,
-    num_cover: usize,
-) {
-    super_row_mm.write(
-        0,
-        &SuperRowHeader {
-            num_rows,
-            num_eqvs,
-            num_cover,
-        } as *const SuperRowHeader,
-        1,
-    );
-}
-
-fn write_num_bytes(super_row_mm: &mut MemoryManager, sr_pos: usize, num_bytes: usize) {
-    super_row_mm.write(sr_pos, &num_bytes as *const _, 1);
-}
-
-fn write_pos_len(
-    super_row_mm: &mut MemoryManager,
-    sr_pos: usize,
-    eqv: usize,
-    pos: usize,
-    len: usize,
-) {
-    super_row_mm.write(
-        sr_pos + size_of::<usize>() + eqv * size_of::<PosLen>(),
-        &PosLen { pos, len } as *const _,
-        1,
-    );
-}
-
-fn write_vid(super_row_mm: &mut MemoryManager, pos: usize, vid: VId) {
-    super_row_mm.write(pos, &vid as *const _, 1);
-}
-
-fn write_index(index_mm: &mut MemoryManager, idx_pos: usize, vid: VId, pos: usize) {
-    index_mm.write(idx_pos, &VIdPos { vid, pos } as *const _, 1);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{data_graph::mm_read_iter, pattern_graph::PatternGraph};
+    use crate::{
+        data_graph::mm_read_iter,
+        executor::{add_super_row, empty_super_row_mm},
+        pattern_graph::{Characteristic, PatternGraph},
+    };
     use std::collections::HashSet;
 
     fn create_super_row_mm(num_eqvs: usize, num_cover: usize) -> MemoryManager {
         let mut mm = MemoryManager::Mem(vec![]);
-        mm.resize(size_of::<SuperRowHeader>());
-        mm.write(
-            0,
-            &SuperRowHeader {
-                num_rows: 0,
-                num_eqvs,
-                num_cover,
-            } as *const _,
-            1,
-        );
+        empty_super_row_mm(&mut mm, num_eqvs, num_cover);
         mm
     }
 
-    fn add_super_row(
+    fn add_super_row_and_index(
         super_row_mm: &mut MemoryManager,
         index_mm: &mut MemoryManager,
         bounds: &[usize],
-        imgs: &[&[VId]],
+        super_row: &[&[VId]],
     ) {
-        let sr_header = super_row_mm.read::<SuperRowHeader>(0);
-        let (num_rows, num_eqvs, num_cover) = unsafe {
-            (
-                (*sr_header).num_rows,
-                (*sr_header).num_eqvs,
-                (*sr_header).num_cover,
-            )
-        };
         let sr_pos = super_row_mm.len();
-        let new_sr_pos = sr_pos
-            + size_of::<usize>()
-            + num_eqvs * size_of::<PosLen>()
-            + bounds.iter().sum::<usize>() * size_of::<VId>();
-        super_row_mm.resize(new_sr_pos);
-        super_row_mm.write(sr_pos, &(new_sr_pos - sr_pos) as *const _, 1);
+        add_super_row(super_row_mm, bounds, super_row);
         let idx_pos = index_mm.len();
         index_mm.resize(idx_pos + size_of::<VIdPos>());
-        let mut pos = sr_pos + size_of::<usize>() + num_eqvs * size_of::<PosLen>();
         index_mm.write(
             idx_pos,
             &VIdPos {
-                vid: *imgs.get(0).unwrap().get(0).unwrap(),
+                vid: *super_row.get(0).unwrap().get(0).unwrap(),
                 pos: sr_pos,
             },
-            1,
-        );
-        for (eqv, (&bound, &img)) in bounds.iter().zip(imgs).enumerate() {
-            super_row_mm.write(
-                sr_pos + size_of::<usize>() + eqv * size_of::<PosLen>(),
-                &PosLen {
-                    pos,
-                    len: img.len(),
-                } as *const _,
-                1,
-            );
-            super_row_mm.write(pos, img.as_ptr(), img.len());
-            pos += bound * size_of::<VId>();
-        }
-        super_row_mm.write(
-            0,
-            &SuperRowHeader {
-                num_rows: num_rows + 1,
-                num_eqvs,
-                num_cover,
-            } as *const _,
             1,
         );
     }
@@ -588,13 +504,13 @@ mod tests {
         );
         let mut super_row_mm0 = create_super_row_mm(3, 1);
         let mut index_mm0 = MemoryManager::Mem(vec![]);
-        add_super_row(
+        add_super_row_and_index(
             &mut super_row_mm0,
             &mut index_mm0,
             &[1, 2, 1],
             &[&[1], &[2, 3], &[4]],
         );
-        add_super_row(
+        add_super_row_and_index(
             &mut super_row_mm0,
             &mut index_mm0,
             &[1, 2, 1],
@@ -602,13 +518,13 @@ mod tests {
         );
         let mut super_row_mm1 = create_super_row_mm(2, 1);
         let mut index_mm1 = MemoryManager::Mem(vec![]);
-        add_super_row(
+        add_super_row_and_index(
             &mut super_row_mm1,
             &mut index_mm1,
             &[1, 2],
             &[&[1], &[2, 3]],
         );
-        add_super_row(
+        add_super_row_and_index(
             &mut super_row_mm1,
             &mut index_mm1,
             &[1, 2],
