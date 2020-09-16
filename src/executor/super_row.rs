@@ -151,8 +151,54 @@ pub fn add_super_row(super_row_mm: &mut MemoryManager, bounds: &[usize], super_r
     write_super_row_header(super_row_mm, num_rows + 1, num_eqvs, num_cover);
 }
 
+pub fn add_super_row_and_index(
+    super_row_mm: &mut MemoryManager,
+    index_mm: &mut MemoryManager,
+    bounds: &[usize],
+    super_row: &[&[VId]],
+) {
+    let sr_pos = super_row_mm.len();
+    add_super_row(super_row_mm, bounds, super_row);
+    let idx_pos = index_mm.len();
+    index_mm.resize(idx_pos + size_of::<VIdPos>());
+    index_mm.write(
+        idx_pos,
+        &VIdPos {
+            vid: *super_row.get(0).unwrap().get(0).unwrap(),
+            pos: sr_pos,
+        },
+        1,
+    );
+}
+
 fn calculate_num_byte(num_eqvs: usize, bounds: &[usize]) -> usize {
     size_of::<usize>()
         + num_eqvs * size_of::<PosLen>()
         + bounds.iter().sum::<usize>() * size_of::<VId>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_super_row_and_index() {
+        let mut sr_mm = MemoryManager::Mem(vec![]);
+        let mut index_mm = MemoryManager::Mem(vec![]);
+        empty_super_row_mm(&mut sr_mm, 2, 1);
+        add_super_row_and_index(&mut sr_mm, &mut index_mm, &[1, 2], &[&[1], &[2, 5]]);
+        add_super_row_and_index(&mut sr_mm, &mut index_mm, &[1, 2], &[&[4], &[2, 5]]);
+        assert_eq!(
+            index_mm
+                .read_slice::<VIdPos>(0, index_mm.len() / size_of::<VIdPos>())
+                .iter()
+                .map(|vid_pos| SuperRow::new(&sr_mm, vid_pos.pos, 2)
+                    .images()
+                    .iter()
+                    .map(|image| image.to_vec())
+                    .collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            vec![vec![vec![1], vec![2, 5]], vec![vec![4], vec![2, 5]]]
+        );
+    }
 }

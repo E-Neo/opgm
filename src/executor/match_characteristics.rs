@@ -407,7 +407,7 @@ mod tests {
     use super::*;
     use crate::{
         data_graph::mm_read_iter,
-        executor::{add_super_row, empty_super_row_mm},
+        executor::{add_super_row_and_index, empty_super_row_mm},
         pattern_graph::{Characteristic, PatternGraph},
     };
     use std::collections::HashSet;
@@ -416,26 +416,6 @@ mod tests {
         let mut mm = MemoryManager::Mem(vec![]);
         empty_super_row_mm(&mut mm, num_eqvs, num_cover);
         mm
-    }
-
-    fn add_super_row_and_index(
-        super_row_mm: &mut MemoryManager,
-        index_mm: &mut MemoryManager,
-        bounds: &[usize],
-        super_row: &[&[VId]],
-    ) {
-        let sr_pos = super_row_mm.len();
-        add_super_row(super_row_mm, bounds, super_row);
-        let idx_pos = index_mm.len();
-        index_mm.resize(idx_pos + size_of::<VIdPos>());
-        index_mm.write(
-            idx_pos,
-            &VIdPos {
-                vid: *super_row.get(0).unwrap().get(0).unwrap(),
-                pos: sr_pos,
-            },
-            1,
-        );
     }
 
     fn create_stars() -> DataGraph {

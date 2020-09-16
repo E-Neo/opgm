@@ -319,10 +319,10 @@ pub struct JoinInfo {
     num_eqv: usize,
     vertex_eqv: HashMap<VId, usize>,
     global_constraint: Option<GlobalConstraint>,
-    indexed_intersection: usize,                  // left_eqv
-    sequential_intersection: Vec<(usize, usize)>, // (left_eqv, right_eqv)
-    left_keep: Vec<usize>,                        // left_eqv
-    right_keep: Vec<usize>,                       // right_eqv
+    indexed_intersection: usize,                   // left_eqv
+    sequential_intersections: Vec<(usize, usize)>, // (left_eqv, right_eqv)
+    left_keeps: Vec<usize>,                        // left_eqv
+    right_keeps: Vec<usize>,                       // right_eqv
 }
 
 impl JoinInfo {
@@ -366,19 +366,19 @@ impl JoinInfo {
         self.indexed_intersection
     }
 
-    /// The `(left_eqv, right_eqv)` to apply the sequential set intersection.
-    pub fn sequential_intersection(&self) -> &[(usize, usize)] {
-        self.sequential_intersection.as_slice()
+    /// The `(left_eqv, right_eqv)`s to apply the sequential set intersection.
+    pub fn sequential_intersections(&self) -> &[(usize, usize)] {
+        self.sequential_intersections.as_slice()
     }
 
-    /// The `left_eqv` to write down directly.
-    pub fn left_keep(&self) -> &[usize] {
-        self.left_keep.as_slice()
+    /// The `left_eqv`s to write down directly.
+    pub fn left_keeps(&self) -> &[usize] {
+        self.left_keeps.as_slice()
     }
 
-    /// The `right_eqv` to write down directly.
-    pub fn right_keep(&self) -> &[usize] {
-        self.right_keep.as_slice()
+    /// The `right_eqv`s to write down directly.
+    pub fn right_keeps(&self) -> &[usize] {
+        self.right_keeps.as_slice()
     }
 }
 
@@ -389,7 +389,7 @@ impl JoinInfo {
             vertex_eqv,
             num_eqv,
             indexed_intersection,
-            sequential_intersection,
+            sequential_intersections,
             left_keep,
             right_keep,
         ) = Self::create_eqv_intersection_keep(left, right);
@@ -407,9 +407,9 @@ impl JoinInfo {
             num_eqv,
             global_constraint: None,
             indexed_intersection,
-            sequential_intersection,
-            left_keep,
-            right_keep,
+            sequential_intersections,
+            left_keeps: left_keep,
+            right_keeps: right_keep,
         }
     }
 
@@ -440,7 +440,7 @@ impl JoinInfo {
         vertex_eqv.insert(right.root(), vertex_eqv.len());
         let mut eqv = vertex_eqv.len(); // eqv == vertex_eqv.len() only at this point.
         let indexed_intersection = Self::create_indexed_intersection(left, right);
-        let sequential_intersection = Self::create_sequential_intersection(
+        let sequential_intersection = Self::create_sequential_intersections(
             &mut vertex_eqv,
             &mut eqv,
             left,
@@ -448,14 +448,14 @@ impl JoinInfo {
             &left_vertices,
             &right_vertices,
         );
-        let left_keep = Self::create_left_keep(
+        let left_keep = Self::create_left_keeps(
             &mut vertex_eqv,
             &mut eqv,
             left,
             &left_vertices,
             &right_vertices,
         );
-        let right_keep = Self::create_right_keep(
+        let right_keep = Self::create_right_keeps(
             &mut vertex_eqv,
             &mut eqv,
             right,
@@ -476,7 +476,7 @@ impl JoinInfo {
         *left.vertex_eqv().get(&right.root()).unwrap()
     }
 
-    fn create_sequential_intersection_info<L: JoinableInfo>(
+    fn create_sequential_intersections_info<L: JoinableInfo>(
         left: &L,
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
@@ -502,7 +502,7 @@ impl JoinInfo {
         info
     }
 
-    fn create_sequential_intersection<L: JoinableInfo>(
+    fn create_sequential_intersections<L: JoinableInfo>(
         vertex_eqv: &mut HashMap<VId, usize>,
         eqv: &mut usize,
         left: &L,
@@ -510,7 +510,7 @@ impl JoinInfo {
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
     ) -> Vec<(usize, usize)> {
-        Self::create_sequential_intersection_info(left, right, &left_vertices, &right_vertices)
+        Self::create_sequential_intersections_info(left, right, &left_vertices, &right_vertices)
             .into_iter()
             .fold(vec![], |mut xs, (l_r_eqv, vertices)| {
                 vertices.into_iter().for_each(|v| {
@@ -522,7 +522,7 @@ impl JoinInfo {
             })
     }
 
-    fn create_left_keep_info<L: JoinableInfo>(
+    fn create_left_keeps_info<L: JoinableInfo>(
         left: &L,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
@@ -543,14 +543,14 @@ impl JoinInfo {
         info
     }
 
-    fn create_left_keep<L: JoinableInfo>(
+    fn create_left_keeps<L: JoinableInfo>(
         vertex_eqv: &mut HashMap<VId, usize>,
         eqv: &mut usize,
         left: &L,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
     ) -> Vec<usize> {
-        Self::create_left_keep_info(left, left_vertices, right_vertices)
+        Self::create_left_keeps_info(left, left_vertices, right_vertices)
             .into_iter()
             .fold(vec![], |mut xs, (left_eqv, vertices)| {
                 vertices.into_iter().for_each(|v| {
@@ -562,7 +562,7 @@ impl JoinInfo {
             })
     }
 
-    fn create_right_keep_info(
+    fn create_right_keeps_info(
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
@@ -581,14 +581,14 @@ impl JoinInfo {
         info
     }
 
-    fn create_right_keep(
+    fn create_right_keeps(
         vertex_eqv: &mut HashMap<VId, usize>,
         eqv: &mut usize,
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
     ) -> Vec<usize> {
-        Self::create_right_keep_info(right, left_vertices, right_vertices)
+        Self::create_right_keeps_info(right, left_vertices, right_vertices)
             .into_iter()
             .fold(vec![], |mut xs, (left_eqv, vertices)| {
                 vertices.into_iter().for_each(|v| {
@@ -758,8 +758,8 @@ mod tests {
                 .collect::<HashMap<_, _>>()
         );
         assert_eq!(join_info.indexed_intersection(), 1);
-        assert_eq!(join_info.sequential_intersection(), &[(2, 2)]);
-        assert_eq!(join_info.left_keep(), &[]);
-        assert_eq!(join_info.right_keep(), &[2]);
+        assert_eq!(join_info.sequential_intersections(), &[(2, 2)]);
+        assert_eq!(join_info.left_keeps(), &[]);
+        assert_eq!(join_info.right_keeps(), &[2]);
     }
 }
