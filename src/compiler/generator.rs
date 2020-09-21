@@ -3,7 +3,7 @@
 use crate::{
     compiler::ast::{Ast, Atom, BuiltIn, Expr},
     pattern_graph::PatternGraph,
-    types::{EdgeConstraint, GlobalConstraint, VId, VertexConstraint},
+    types::{EdgeConstraint, GlobalConstraint, VId, VertexConstraint, VertexCoverConstraint},
 };
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
@@ -326,11 +326,181 @@ fn emit_global_constraint(expr: &Expr) -> GlobalConstraint {
     }
 }
 
-/// Compile the global constraint.
-pub fn compile_global_constraints(
-    gcs: &[&Expr],
+fn emit_vertex_cover_constraint_and(args: &[Expr], vid: VId) -> VertexCoverConstraint {
+    let args: Vec<_> = args
+        .iter()
+        .map(|expr| emit_vertex_cover_constraint(expr, vid))
+        .collect();
+    VertexCoverConstraint::new(Box::new(move |vc, v| args.iter().all(|f| f.f()(vc, v))))
+}
+
+fn emit_vertex_cover_constraint_or(args: &[Expr], vid: VId) -> VertexCoverConstraint {
+    let args: Vec<_> = args
+        .iter()
+        .map(|expr| emit_vertex_cover_constraint(expr, vid))
+        .collect();
+    VertexCoverConstraint::new(Box::new(move |vc, v| args.iter().any(|f| f.f()(vc, v))))
+}
+
+fn emit_vertex_cover_constraint_not(arg: &Expr, vid: VId) -> VertexCoverConstraint {
+    let arg = emit_vertex_cover_constraint(arg, vid);
+    VertexCoverConstraint::new(Box::new(move |vc, v| !arg.f()(vc, v)))
+}
+
+fn emit_vertex_cover_constraint_lt(left: &Expr, right: &Expr, vid: VId) -> VertexCoverConstraint {
+    match (left, right) {
+        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::VId(r))) => {
+            if l < vid && r < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
+                    vc.get_unchecked(l as usize) < vc.get_unchecked(r as usize)
+                }))
+            } else if l < vid && r == vid {
+                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
+                    *vc.get_unchecked(l as usize) < v
+                }))
+            } else if l == vid && r < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
+                    v < *vc.get_unchecked(r as usize)
+                }))
+            } else {
+                panic!(
+                    "Invalid vertex cover constraint (LT {:?} {:?})",
+                    left, right
+                )
+            }
+        }
+        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::Num(n))) => {
+            if l < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
+                    *vc.get_unchecked(l as usize) < n
+                }))
+            } else if l == vid {
+                VertexCoverConstraint::new(Box::new(move |_, v| v < n))
+            } else {
+                panic!(
+                    "Invalid vertex cover constraint (LT {:?} {:?})",
+                    left, right
+                )
+            }
+        }
+        (&Expr::Constant(Atom::Num(n)), &Expr::Constant(Atom::VId(r))) => {
+            if r < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
+                    n < *vc.get_unchecked(r as usize)
+                }))
+            } else if r == vid {
+                VertexCoverConstraint::new(Box::new(move |_, v| n < v))
+            } else {
+                panic!(
+                    "Invalid vertex cover constraint (LT {:?} {:?})",
+                    left, right
+                )
+            }
+        }
+        _ => panic!(
+            "Invalid vertex cover constraint (LT {:?} {:?})",
+            left, right
+        ),
+    }
+}
+
+fn emit_vertex_cover_constraint_ge(left: &Expr, right: &Expr, vid: VId) -> VertexCoverConstraint {
+    match (left, right) {
+        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::VId(r))) => {
+            if l < vid && r < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
+                    vc.get_unchecked(l as usize) >= vc.get_unchecked(r as usize)
+                }))
+            } else if l < vid && r == vid {
+                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
+                    *vc.get_unchecked(l as usize) >= v
+                }))
+            } else if l == vid && r < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
+                    v >= *vc.get_unchecked(r as usize)
+                }))
+            } else {
+                panic!(
+                    "Invalid vertex cover constraint (GE {:?} {:?})",
+                    left, right
+                )
+            }
+        }
+        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::Num(n))) => {
+            if l < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
+                    *vc.get_unchecked(l as usize) >= n
+                }))
+            } else if l == vid {
+                VertexCoverConstraint::new(Box::new(move |_, v| v >= n))
+            } else {
+                panic!(
+                    "Invalid vertex cover constraint (GE {:?} {:?})",
+                    left, right
+                )
+            }
+        }
+        (&Expr::Constant(Atom::Num(n)), &Expr::Constant(Atom::VId(r))) => {
+            if r < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
+                    n >= *vc.get_unchecked(r as usize)
+                }))
+            } else if r == vid {
+                VertexCoverConstraint::new(Box::new(move |_, v| n >= v))
+            } else {
+                panic!(
+                    "Invalid vertex cover constraint (GE {:?} {:?})",
+                    left, right
+                )
+            }
+        }
+        _ => panic!(
+            "Invalid vertex cover constraint (GE {:?} {:?})",
+            left, right
+        ),
+    }
+}
+
+fn emit_vertex_cover_constraint(expr: &Expr, vid: VId) -> VertexCoverConstraint {
+    match expr {
+        Expr::Constant(_) => panic!("Vertex cover constraint should not be Constant"),
+        Expr::Application(fun, args) => {
+            if let Expr::Constant(Atom::BuiltIn(builtin)) = &**fun {
+                match builtin {
+                    BuiltIn::And => emit_vertex_cover_constraint_and(args, vid),
+                    BuiltIn::Or => emit_vertex_cover_constraint_or(args, vid),
+                    BuiltIn::Not => emit_vertex_cover_constraint_not(&args[0], vid),
+                    BuiltIn::LT => emit_vertex_cover_constraint_lt(&args[0], &args[1], vid),
+                    BuiltIn::GE => emit_vertex_cover_constraint_ge(&args[0], &args[1], vid),
+                }
+            } else {
+                panic!("Invalid application: {:?}", &**fun)
+            }
+        }
+    }
+}
+
+/// Extracts valid `GlobalConstraint` from `global_constraints` and compiles it.
+pub fn extract_global_constraint(
+    global_constraints: &mut Vec<Expr>,
     vertex_eqv: &HashMap<VId, usize>,
 ) -> Option<GlobalConstraint> {
+    let vertices: HashSet<VId> = vertex_eqv.keys().map(|&x| x).collect();
+    let capacity = global_constraints.len();
+    let (mut gcs, new_gcs) = std::mem::replace(global_constraints, vec![])
+        .into_iter()
+        .fold(
+            (Vec::with_capacity(capacity), Vec::with_capacity(capacity)),
+            |(mut gcs, mut new_gcs), gc| {
+                if extract_vertices(&gc).is_subset(&vertices) {
+                    gcs.push(gc);
+                } else {
+                    new_gcs.push(gc);
+                }
+                (gcs, new_gcs)
+            },
+        );
+    *global_constraints = new_gcs;
     if gcs.len() == 0 {
         None
     } else {
@@ -339,15 +509,56 @@ pub fn compile_global_constraints(
             .map(|(&vid, &eqv)| (vid, eqv as VId))
             .collect();
         let mut expr = if gcs.len() == 1 {
-            gcs[0].clone()
+            gcs.pop().unwrap()
         } else {
-            Expr::Application(
-                Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::And))),
-                gcs.iter().map(|&gc| gc.clone()).collect(),
-            )
+            Expr::Application(Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::And))), gcs)
         };
         rename_vid(&mut expr, &rules);
         Some(emit_global_constraint(&expr))
+    }
+}
+
+/// Extracts valid `VertexCoverConstraint` from `global_constraints` and compiles it.
+pub fn extract_vertex_cover_constraint(
+    global_constraints: &mut Vec<Expr>,
+    vertex_cover_eqv: &HashMap<VId, usize>,
+    vid: VId,
+) -> Option<VertexCoverConstraint> {
+    let vertex_cover: HashSet<VId> = vertex_cover_eqv.keys().map(|&x| x).collect();
+    let capacity = global_constraints.len();
+    let (mut gcs, new_gcs) = std::mem::replace(global_constraints, vec![])
+        .into_iter()
+        .fold(
+            (Vec::with_capacity(capacity), Vec::with_capacity(capacity)),
+            |(mut gcs, mut new_gcs), gc| {
+                let mut gc_vertices = extract_vertices(&gc);
+                if gc_vertices.remove(&vid) && gc_vertices.is_subset(&vertex_cover) {
+                    gcs.push(gc);
+                } else {
+                    new_gcs.push(gc);
+                }
+                (gcs, new_gcs)
+            },
+        );
+    *global_constraints = new_gcs;
+    if gcs.len() == 0 {
+        None
+    } else {
+        let rules: HashMap<VId, VId> = vertex_cover_eqv
+            .iter()
+            .map(|(&vid, &eqv)| (vid, eqv as VId))
+            .chain(std::iter::once((vid, vertex_cover.len() as VId)))
+            .collect();
+        let mut expr = if gcs.len() == 1 {
+            gcs.pop().unwrap()
+        } else {
+            Expr::Application(Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::And))), gcs)
+        };
+        rename_vid(&mut expr, &rules);
+        Some(emit_vertex_cover_constraint(
+            &expr,
+            vertex_cover.len() as VId,
+        ))
     }
 }
 
@@ -629,9 +840,9 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_global_constraints() {
-        let f = compile_global_constraints(
-            &[&expr_parse("(or (< u1 u2) (< u1 u3))").unwrap()],
+    fn test_compile_global_constraint() {
+        let f = extract_global_constraint(
+            &mut vec![expr_parse("(or (< u1 u2) (< u1 u3))").unwrap()],
             &vec![(1, 0), (2, 1), (3, 2)].into_iter().collect(),
         );
         assert_eq!(

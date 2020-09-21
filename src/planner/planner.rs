@@ -3,13 +3,13 @@
 use crate::{
     compiler::{
         ast::Expr,
-        generator::{compile_global_constraints, extract_vertices},
+        generator::{extract_global_constraint, extract_vertex_cover_constraint, extract_vertices},
     },
     data_graph::DataGraph,
     memory_manager::{MemoryManager, MmapFile},
     pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
     planner::decompose_stars,
-    types::{GlobalConstraint, VId, VLabel},
+    types::{GlobalConstraint, VId, VLabel, VertexCoverConstraint},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
@@ -23,7 +23,7 @@ pub enum MemoryManagerType {
 pub struct Planner<'a, 'b> {
     data_graph: &'a DataGraph,
     pattern_graph: &'a PatternGraph<'b>,
-    global_constraints: Vec<Expr>,
+    global_constraints: &'a mut Vec<Expr>,
     super_row_mm_type: MemoryManagerType,
     index_mm_type: MemoryManagerType,
 }
@@ -32,7 +32,7 @@ impl<'a, 'b> Planner<'a, 'b> {
     pub fn new(
         data_graph: &'a DataGraph,
         pattern_graph: &'a PatternGraph<'b>,
-        global_constraints: Vec<Expr>,
+        global_constraints: &'a mut Vec<Expr>,
     ) -> Self {
         Self {
             data_graph,
@@ -58,11 +58,9 @@ impl<'a, 'b> Planner<'a, 'b> {
         let characteristic_ids = self.create_characteristic_ids(&roots);
         let stars = self.create_stars(&roots, &characteristic_ids);
         let stars_plan = self.create_stars_plan(&characteristic_ids);
-        let join_plan = self.create_join_plan(
-            &stars,
-            characteristic_ids.len(),
-            self.global_constraints.as_slice(),
-        );
+        let mut global_constraints = std::mem::replace(self.global_constraints, vec![]);
+        let join_plan =
+            self.create_join_plan(&stars, characteristic_ids.len(), &mut global_constraints);
         Plan {
             data_graph: self.data_graph,
             pattern_graph: self.pattern_graph,
@@ -133,15 +131,20 @@ impl<'a, 'b> Planner<'a, 'b> {
         &self,
         stars: &[StarInfo],
         mut id: usize,
-        global_constraints: &[Expr],
+        global_constraints: &mut Vec<Expr>,
     ) -> Vec<JoinInfo> {
         if stars.len() < 2 {
             vec![]
         } else {
-            let mut join_infos = vec![JoinInfo::new(&stars[0], &stars[1], id)];
+            let mut join_infos = vec![JoinInfo::new(global_constraints, &stars[0], &stars[1], id)];
             id += 1;
             for right in stars.iter().skip(2) {
-                join_infos.push(JoinInfo::new(join_infos.last().unwrap(), right, id));
+                join_infos.push(JoinInfo::new(
+                    global_constraints,
+                    join_infos.last().unwrap(),
+                    right,
+                    id,
+                ));
                 id += 1;
             }
             let mut gc_verticeses: Vec<(&Expr, HashSet<VId>)> = global_constraints
@@ -165,10 +168,6 @@ impl<'a, 'b> Planner<'a, 'b> {
                             }
                             gcvs
                         });
-                info.set_global_constraint(compile_global_constraints(
-                    info_gcs.as_slice(),
-                    info.vertex_eqv(),
-                ));
             }
             join_infos
         }
@@ -318,11 +317,15 @@ pub struct JoinInfo {
     vertex_cover: Vec<VId>,
     num_eqv: usize,
     vertex_eqv: HashMap<VId, usize>,
-    global_constraint: Option<GlobalConstraint>,
-    indexed_intersection: usize,                   // left_eqv
-    sequential_intersections: Vec<(usize, usize)>, // (left_eqv, right_eqv)
-    left_keeps: Vec<usize>,                        // left_eqv
-    right_keeps: Vec<usize>,                       // right_eqv
+    vertex_cover_constraint: Option<GlobalConstraint>,
+    /// left_eqv
+    indexed_intersection: usize,
+    /// (left_eqv, right_eqv, constraint)
+    sequential_intersections: Vec<(usize, usize, Option<VertexCoverConstraint>)>,
+    /// (left_eqv, constraint)
+    left_keeps: Vec<(usize, Option<VertexCoverConstraint>)>,
+    /// (right_eqv, constraint)
+    right_keeps: Vec<(usize, Option<VertexCoverConstraint>)>,
 }
 
 impl JoinInfo {
@@ -356,9 +359,9 @@ impl JoinInfo {
         &self.vertex_eqv
     }
 
-    /// The `GlobalConstraint`.
-    pub fn global_constraint(&self) -> &Option<GlobalConstraint> {
-        &self.global_constraint
+    /// The vertex cover's global constraint.
+    pub fn vertex_cover_constraint(&self) -> &Option<GlobalConstraint> {
+        &self.vertex_cover_constraint
     }
 
     /// The `left_eqv` to apply the index-based join.
@@ -366,33 +369,39 @@ impl JoinInfo {
         self.indexed_intersection
     }
 
-    /// The `(left_eqv, right_eqv)`s to apply the sequential set intersection.
-    pub fn sequential_intersections(&self) -> &[(usize, usize)] {
+    /// The `(left_eqv, right_eqv, constraint)`s to apply the sequential set intersection.
+    pub fn sequential_intersections(&self) -> &[(usize, usize, Option<VertexCoverConstraint>)] {
         self.sequential_intersections.as_slice()
     }
 
-    /// The `left_eqv`s to write down directly.
-    pub fn left_keeps(&self) -> &[usize] {
+    /// The `(left_eqv, constraint)`s to write down directly.
+    pub fn left_keeps(&self) -> &[(usize, Option<VertexCoverConstraint>)] {
         self.left_keeps.as_slice()
     }
 
-    /// The `right_eqv`s to write down directly.
-    pub fn right_keeps(&self) -> &[usize] {
+    /// The `(right_eqv, constraint)`s to write down directly.
+    pub fn right_keeps(&self) -> &[(usize, Option<VertexCoverConstraint>)] {
         self.right_keeps.as_slice()
     }
 }
 
 // private methods.
 impl JoinInfo {
-    fn new<L: JoinableInfo>(left: &L, right: &StarInfo, id: usize) -> Self {
+    fn new<L: JoinableInfo>(
+        global_constraints: &mut Vec<Expr>,
+        left: &L,
+        right: &StarInfo,
+        id: usize,
+    ) -> Self {
         let (
             vertex_eqv,
             num_eqv,
+            vertex_cover_constraint,
             indexed_intersection,
             sequential_intersections,
-            left_keep,
-            right_keep,
-        ) = Self::create_eqv_intersection_keep(left, right);
+            left_keeps,
+            right_keeps,
+        ) = Self::create_eqv_intersection_keep(global_constraints, left, right);
         Self {
             id,
             left_id: left.id(),
@@ -405,28 +414,26 @@ impl JoinInfo {
                 .collect(),
             vertex_eqv,
             num_eqv,
-            global_constraint: None,
+            vertex_cover_constraint,
             indexed_intersection,
             sequential_intersections,
-            left_keeps: left_keep,
-            right_keeps: right_keep,
+            left_keeps,
+            right_keeps,
         }
     }
 
-    fn set_global_constraint(&mut self, global_constraint: Option<GlobalConstraint>) {
-        self.global_constraint = global_constraint
-    }
-
     fn create_eqv_intersection_keep<L: JoinableInfo>(
+        global_constraints: &mut Vec<Expr>,
         left: &L,
         right: &StarInfo,
     ) -> (
         HashMap<VId, usize>,
         usize,
+        Option<GlobalConstraint>,
         usize,
-        Vec<(usize, usize)>,
-        Vec<usize>,
-        Vec<usize>,
+        Vec<(usize, usize, Option<VertexCoverConstraint>)>,
+        Vec<(usize, Option<VertexCoverConstraint>)>,
+        Vec<(usize, Option<VertexCoverConstraint>)>,
     ) {
         let left_vertices: HashSet<VId> = left.vertex_eqv().keys().map(|&x| x).collect();
         let right_vertices: HashSet<VId> = right.vertex_eqv().keys().map(|&x| x).collect();
@@ -438,26 +445,35 @@ impl JoinInfo {
             .map(|(eqv, vid)| (vid, eqv))
             .collect();
         vertex_eqv.insert(right.root(), vertex_eqv.len());
+        let vertex_cover_eqv = vertex_eqv.clone();
+        let vertex_cover_constraint =
+            extract_global_constraint(global_constraints, &vertex_cover_eqv);
         let mut eqv = vertex_eqv.len(); // eqv == vertex_eqv.len() only at this point.
         let indexed_intersection = Self::create_indexed_intersection(left, right);
         let sequential_intersection = Self::create_sequential_intersections(
+            global_constraints,
             &mut vertex_eqv,
             &mut eqv,
+            &vertex_cover_eqv,
             left,
             right,
             &left_vertices,
             &right_vertices,
         );
         let left_keep = Self::create_left_keeps(
+            global_constraints,
             &mut vertex_eqv,
             &mut eqv,
+            &vertex_cover_eqv,
             left,
             &left_vertices,
             &right_vertices,
         );
         let right_keep = Self::create_right_keeps(
+            global_constraints,
             &mut vertex_eqv,
             &mut eqv,
+            &vertex_cover_eqv,
             right,
             &left_vertices,
             &right_vertices,
@@ -465,6 +481,7 @@ impl JoinInfo {
         (
             vertex_eqv,
             eqv,
+            vertex_cover_constraint,
             indexed_intersection,
             sequential_intersection,
             left_keep,
@@ -477,11 +494,13 @@ impl JoinInfo {
     }
 
     fn create_sequential_intersections_info<L: JoinableInfo>(
+        global_constraints: &mut Vec<Expr>,
+        vertex_cover_eqv: &HashMap<VId, usize>,
         left: &L,
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
-    ) -> BTreeMap<(usize, usize), Vec<VId>> {
+    ) -> BTreeMap<(usize, usize, Option<VertexCoverConstraint>), Vec<VId>> {
         let mut vertices: HashSet<VId> = left_vertices
             .intersection(&right_vertices)
             .map(|&x| x)
@@ -490,11 +509,13 @@ impl JoinInfo {
             vertices.remove(vid);
         }
         vertices.remove(&right.root());
-        let mut info: BTreeMap<(usize, usize), Vec<VId>> = BTreeMap::new();
+        let mut info: BTreeMap<(usize, usize, Option<VertexCoverConstraint>), Vec<VId>> =
+            BTreeMap::new();
         for v in vertices {
             info.entry((
                 *left.vertex_eqv().get(&v).unwrap(),
                 *right.vertex_eqv().get(&v).unwrap(),
+                extract_vertex_cover_constraint(global_constraints, vertex_cover_eqv, v),
             ))
             .or_default()
             .push(v);
@@ -503,30 +524,41 @@ impl JoinInfo {
     }
 
     fn create_sequential_intersections<L: JoinableInfo>(
+        global_constraints: &mut Vec<Expr>,
         vertex_eqv: &mut HashMap<VId, usize>,
         eqv: &mut usize,
+        vertex_cover_eqv: &HashMap<VId, usize>,
         left: &L,
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
-    ) -> Vec<(usize, usize)> {
-        Self::create_sequential_intersections_info(left, right, &left_vertices, &right_vertices)
-            .into_iter()
-            .fold(vec![], |mut xs, (l_r_eqv, vertices)| {
-                vertices.into_iter().for_each(|v| {
-                    vertex_eqv.insert(v, *eqv);
-                });
-                *eqv += 1;
-                xs.push(l_r_eqv);
-                xs
-            })
+    ) -> Vec<(usize, usize, Option<VertexCoverConstraint>)> {
+        Self::create_sequential_intersections_info(
+            global_constraints,
+            vertex_cover_eqv,
+            left,
+            right,
+            &left_vertices,
+            &right_vertices,
+        )
+        .into_iter()
+        .fold(vec![], |mut xs, (l_r_eqv, vertices)| {
+            vertices.into_iter().for_each(|v| {
+                vertex_eqv.insert(v, *eqv);
+            });
+            *eqv += 1;
+            xs.push(l_r_eqv);
+            xs
+        })
     }
 
     fn create_left_keeps_info<L: JoinableInfo>(
+        global_constraints: &mut Vec<Expr>,
+        vertex_cover_eqv: &HashMap<VId, usize>,
         left: &L,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
-    ) -> BTreeMap<usize, Vec<VId>> {
+    ) -> BTreeMap<(usize, Option<VertexCoverConstraint>), Vec<VId>> {
         let mut vertices: HashSet<VId> = left_vertices
             .difference(&right_vertices)
             .map(|&x| x)
@@ -534,70 +566,94 @@ impl JoinInfo {
         for vid in left.vertex_cover() {
             vertices.remove(vid);
         }
-        let mut info: BTreeMap<usize, Vec<VId>> = BTreeMap::new();
+        let mut info: BTreeMap<(usize, Option<VertexCoverConstraint>), Vec<VId>> = BTreeMap::new();
         for v in vertices {
-            info.entry(*left.vertex_eqv().get(&v).unwrap())
-                .or_default()
-                .push(v);
+            info.entry((
+                *left.vertex_eqv().get(&v).unwrap(),
+                extract_vertex_cover_constraint(global_constraints, vertex_cover_eqv, v),
+            ))
+            .or_default()
+            .push(v);
         }
         info
     }
 
     fn create_left_keeps<L: JoinableInfo>(
+        global_constraints: &mut Vec<Expr>,
         vertex_eqv: &mut HashMap<VId, usize>,
         eqv: &mut usize,
+        vertex_cover_eqv: &HashMap<VId, usize>,
         left: &L,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
-    ) -> Vec<usize> {
-        Self::create_left_keeps_info(left, left_vertices, right_vertices)
-            .into_iter()
-            .fold(vec![], |mut xs, (left_eqv, vertices)| {
-                vertices.into_iter().for_each(|v| {
-                    vertex_eqv.insert(v, *eqv);
-                });
-                *eqv += 1;
-                xs.push(left_eqv);
-                xs
-            })
+    ) -> Vec<(usize, Option<VertexCoverConstraint>)> {
+        Self::create_left_keeps_info(
+            global_constraints,
+            vertex_cover_eqv,
+            left,
+            left_vertices,
+            right_vertices,
+        )
+        .into_iter()
+        .fold(vec![], |mut xs, (left_eqv, vertices)| {
+            vertices.into_iter().for_each(|v| {
+                vertex_eqv.insert(v, *eqv);
+            });
+            *eqv += 1;
+            xs.push(left_eqv);
+            xs
+        })
     }
 
     fn create_right_keeps_info(
+        global_constraints: &mut Vec<Expr>,
+        vertex_cover_eqv: &HashMap<VId, usize>,
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
-    ) -> BTreeMap<usize, Vec<VId>> {
+    ) -> BTreeMap<(usize, Option<VertexCoverConstraint>), Vec<VId>> {
         let mut vertices: HashSet<VId> = right_vertices
             .difference(&left_vertices)
             .map(|&x| x)
             .collect();
         vertices.remove(&right.root());
-        let mut info: BTreeMap<usize, Vec<VId>> = BTreeMap::new();
+        let mut info: BTreeMap<(usize, Option<VertexCoverConstraint>), Vec<VId>> = BTreeMap::new();
         for v in vertices {
-            info.entry(*right.vertex_eqv().get(&v).unwrap())
-                .or_default()
-                .push(v);
+            info.entry((
+                *right.vertex_eqv().get(&v).unwrap(),
+                extract_vertex_cover_constraint(global_constraints, vertex_cover_eqv, v),
+            ))
+            .or_default()
+            .push(v);
         }
         info
     }
 
     fn create_right_keeps(
+        global_constraints: &mut Vec<Expr>,
         vertex_eqv: &mut HashMap<VId, usize>,
         eqv: &mut usize,
+        vertex_cover_eqv: &HashMap<VId, usize>,
         right: &StarInfo,
         left_vertices: &HashSet<VId>,
         right_vertices: &HashSet<VId>,
-    ) -> Vec<usize> {
-        Self::create_right_keeps_info(right, left_vertices, right_vertices)
-            .into_iter()
-            .fold(vec![], |mut xs, (left_eqv, vertices)| {
-                vertices.into_iter().for_each(|v| {
-                    vertex_eqv.insert(v, *eqv);
-                });
-                *eqv += 1;
-                xs.push(left_eqv);
-                xs
-            })
+    ) -> Vec<(usize, Option<VertexCoverConstraint>)> {
+        Self::create_right_keeps_info(
+            global_constraints,
+            vertex_cover_eqv,
+            right,
+            left_vertices,
+            right_vertices,
+        )
+        .into_iter()
+        .fold(vec![], |mut xs, (left_eqv, vertices)| {
+            vertices.into_iter().for_each(|v| {
+                vertex_eqv.insert(v, *eqv);
+            });
+            *eqv += 1;
+            xs.push(left_eqv);
+            xs
+        })
     }
 }
 
@@ -730,7 +786,8 @@ mod tests {
     fn test_stars_plan() {
         let data_graph = create_data_graph();
         let pattern_graph = create_pattern_graph();
-        let plan = Planner::new(&data_graph, &pattern_graph, vec![]).plan();
+        let mut global_constraints = vec![];
+        let plan = Planner::new(&data_graph, &pattern_graph, &mut global_constraints).plan();
         assert_eq!(
             plan.stars_plan(),
             &[(
@@ -748,7 +805,7 @@ mod tests {
         let pattern_graph = create_pattern_graph1();
         let star_info1 = StarInfo::new(&pattern_graph, 0, 0);
         let star_info2 = StarInfo::new(&pattern_graph, 1, 1);
-        let join_info = JoinInfo::new(&star_info1, &star_info2, 2);
+        let join_info = JoinInfo::new(&mut vec![], &star_info1, &star_info2, 2);
         assert_eq!(join_info.vertex_cover(), &[0, 1]);
         assert_eq!(join_info.num_eqv(), 4);
         assert_eq!(
@@ -758,8 +815,8 @@ mod tests {
                 .collect::<HashMap<_, _>>()
         );
         assert_eq!(join_info.indexed_intersection(), 1);
-        assert_eq!(join_info.sequential_intersections(), &[(2, 2)]);
+        assert_eq!(join_info.sequential_intersections(), &[(2, 2, None)]);
         assert_eq!(join_info.left_keeps(), &[]);
-        assert_eq!(join_info.right_keeps(), &[2]);
+        assert_eq!(join_info.right_keeps(), &[(2, None)]);
     }
 }

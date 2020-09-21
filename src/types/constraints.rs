@@ -150,6 +150,55 @@ impl Hash for GlobalConstraint {
     }
 }
 
+/// Vertex cover constraint type.
+pub struct VertexCoverConstraint {
+    f: Box<dyn Fn(&[VId], VId) -> bool>,
+}
+
+impl VertexCoverConstraint {
+    pub fn new(f: Box<dyn Fn(&[VId], VId) -> bool>) -> Self {
+        Self { f }
+    }
+
+    pub fn f(&self) -> &dyn Fn(&[VId], VId) -> bool {
+        self.f.as_ref()
+    }
+}
+
+impl std::fmt::Debug for VertexCoverConstraint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VertexCoverConstraint({:p})", self.f)
+    }
+}
+
+impl PartialEq for VertexCoverConstraint {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.f.as_ref() as *const _, other.f.as_ref() as *const _)
+    }
+}
+
+impl Eq for VertexCoverConstraint {}
+
+impl PartialOrd for VertexCoverConstraint {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (self.f.as_ref() as *const _ as *const u8 as usize)
+            .partial_cmp(&(other.f.as_ref() as *const _ as *const u8 as usize))
+    }
+}
+
+impl Ord for VertexCoverConstraint {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.f.as_ref() as *const _ as *const u8 as usize)
+            .cmp(&(other.f.as_ref() as *const _ as *const u8 as usize))
+    }
+}
+
+impl Hash for VertexCoverConstraint {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (self.f.as_ref() as *const _ as *const u8 as usize).hash(state);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +208,12 @@ mod tests {
         let gc = GlobalConstraint::new(Box::new(|vs| vs[0] < vs[1] && vs[1] < vs[2]));
         assert_eq!(gc.f()(&[1, 2, 3]), true);
         assert_eq!(gc.f()(&[1, 3, 2]), false);
+    }
+
+    #[test]
+    fn test_vertex_cover_constraint() {
+        let vcc = VertexCoverConstraint::new(Box::new(|vc, v| vc[0] < v || vc[1] < v));
+        assert_eq!(vcc.f()(&[1, 2], 3), true);
+        assert_eq!(vcc.f()(&[2, 3], 1), false);
     }
 }
