@@ -1,6 +1,28 @@
-use memmap::MmapMut;
+use memmap::{Mmap, MmapMut};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
+
+/// A read-only memory mapped file.
+pub struct MmapReadOnlyFile {
+    mmap: Mmap,
+    len: u64,
+}
+
+impl MmapReadOnlyFile {
+    pub fn from_file(file: &File) -> Self {
+        let len = file.metadata().unwrap().len();
+        let mmap = unsafe { Mmap::map(&file) }.unwrap();
+        Self { mmap, len }
+    }
+
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub fn read<T>(&self, pos: usize) -> *const T {
+        unsafe { self.mmap.as_ptr().add(pos) as *const T }
+    }
+}
 
 /// A memory mapped file.
 pub struct MmapFile {
@@ -64,6 +86,8 @@ impl MmapFile {
 pub enum MemoryManager {
     /// A memory buffer.
     Mem(Vec<u8>),
+    /// A read-only memory mapped buffer.
+    MmapReadOnly(MmapReadOnlyFile),
     /// A memory mapped buffer.
     Mmap(MmapFile),
     /// A sink.
@@ -74,6 +98,7 @@ impl MemoryManager {
     pub fn len(&self) -> usize {
         match self {
             MemoryManager::Mem(vec) => vec.len(),
+            MemoryManager::MmapReadOnly(mmapfile) => mmapfile.len(),
             MemoryManager::Mmap(mmapfile) => mmapfile.len(),
             MemoryManager::Sink => 0,
         }
@@ -82,6 +107,7 @@ impl MemoryManager {
     pub fn resize(&mut self, new_len: usize) {
         match self {
             MemoryManager::Mem(vec) => vec.resize(new_len, 0),
+            MemoryManager::MmapReadOnly(_) => panic!("Cannot resize read only file"),
             MemoryManager::Mmap(mmapfile) => mmapfile.resize(new_len),
             MemoryManager::Sink => (),
         }
@@ -90,6 +116,7 @@ impl MemoryManager {
     pub fn read<T>(&self, pos: usize) -> *const T {
         match self {
             MemoryManager::Mem(vec) => unsafe { vec.as_ptr().add(pos) as *const T },
+            MemoryManager::MmapReadOnly(mmapfile) => mmapfile.read(pos),
             MemoryManager::Mmap(mmapfile) => mmapfile.read(pos),
             MemoryManager::Sink => std::ptr::null(),
         }
@@ -99,6 +126,9 @@ impl MemoryManager {
         match self {
             MemoryManager::Mem(vec) => unsafe {
                 std::slice::from_raw_parts(vec.as_ptr().add(pos) as *const T, count)
+            },
+            MemoryManager::MmapReadOnly(mmapfile) => unsafe {
+                std::slice::from_raw_parts(mmapfile.read(pos), count)
             },
             MemoryManager::Mmap(mmapfile) => unsafe {
                 std::slice::from_raw_parts(mmapfile.read(pos), count)
@@ -112,6 +142,7 @@ impl MemoryManager {
             MemoryManager::Mem(vec) => unsafe {
                 std::ptr::copy(data, vec.as_mut_ptr().add(pos) as *mut T, count)
             },
+            MemoryManager::MmapReadOnly(_) => panic!("Cannot write read-only file"),
             MemoryManager::Mmap(mmapfile) => mmapfile.write(pos, data, count),
             MemoryManager::Sink => (),
         }

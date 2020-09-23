@@ -1,0 +1,17 @@
+name: opgm
+version: "0.0"
+author: Yanxuan Cui <e-neo@qq.com>
+about: Out-of-core property graph matching
+subcommands:
+  - createdb:
+      about: Creates data graph database file
+      args:
+        - SQLITE3:
+            required: true
+        - FILE:
+            required: true
+  - displaydb:
+      about: Displays disk format of the data graph database file
+      args:
+        - FILE:
+            required: true
