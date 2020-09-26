@@ -3,7 +3,10 @@
 use crate::{
     compiler::{
         ast::Expr,
-        generator::{extract_global_constraint, extract_vertex_cover_constraint, extract_vertices},
+        generator::{
+            extract_global_constraint, extract_vertex_cover_constraint, extract_vertices,
+            EdgeConstraintsInfo, VertexConstraintsInfo,
+        },
     },
     data_graph::DataGraph,
     memory_manager::{MemoryManager, MmapFile},
@@ -20,11 +23,40 @@ pub enum MemoryManagerType {
     Sink,
 }
 
+pub struct Task<'a, 'b> {
+    data_graph: &'a DataGraph,
+    pattern_graph: PatternGraph<'b>,
+    gcs: Vec<Expr>,
+}
+
+impl<'a, 'b> Task<'a, 'b> {
+    pub fn new(
+        data_graph: &'a DataGraph,
+        mut pattern_graph: PatternGraph<'b>,
+        vc_info: &'b VertexConstraintsInfo,
+        ec_info: &'b EdgeConstraintsInfo,
+        gcs: Vec<Expr>,
+    ) -> Self {
+        vc_info.add_to_graph(&mut pattern_graph);
+        ec_info.add_to_graph(&mut pattern_graph);
+        Self {
+            data_graph,
+            pattern_graph,
+            gcs,
+        }
+    }
+
+    pub fn prepare(&'a mut self) -> Planner<'a, 'b> {
+        Planner::new(self.data_graph, &self.pattern_graph, &mut self.gcs)
+    }
+}
+
 pub struct Planner<'a, 'b> {
     data_graph: &'a DataGraph,
     pattern_graph: &'a PatternGraph<'b>,
     global_constraints: &'a mut Vec<Expr>,
-    super_row_mm_type: MemoryManagerType,
+    star_sr_mm_type: MemoryManagerType,
+    join_sr_mm_type: MemoryManagerType,
     index_mm_type: MemoryManagerType,
 }
 
@@ -38,13 +70,19 @@ impl<'a, 'b> Planner<'a, 'b> {
             data_graph,
             pattern_graph,
             global_constraints,
-            super_row_mm_type: MemoryManagerType::Mem,
+            star_sr_mm_type: MemoryManagerType::Mem,
+            join_sr_mm_type: MemoryManagerType::Mem,
             index_mm_type: MemoryManagerType::Mem,
         }
     }
 
-    pub fn super_row_mm_type(&mut self, mm_type: MemoryManagerType) -> &mut Self {
-        self.super_row_mm_type = mm_type;
+    pub fn star_sr_mm_type(&mut self, mm_type: MemoryManagerType) -> &mut Self {
+        self.star_sr_mm_type = mm_type;
+        self
+    }
+
+    pub fn join_sr_mm_type(&mut self, mm_type: MemoryManagerType) -> &mut Self {
+        self.join_sr_mm_type = mm_type;
         self
     }
 
@@ -64,8 +102,10 @@ impl<'a, 'b> Planner<'a, 'b> {
         Plan {
             data_graph: self.data_graph,
             pattern_graph: self.pattern_graph,
-            super_row_mm_type: self.super_row_mm_type,
-            super_row_mm_len: characteristic_ids.len() + roots.len() - 1,
+            star_sr_mm_type: self.star_sr_mm_type,
+            join_sr_mm_type: self.join_sr_mm_type,
+            star_sr_mms_len: characteristic_ids.len(),
+            join_sr_mms_len: roots.len() - 1,
             index_mm_type: self.index_mm_type,
             index_mm_len: characteristic_ids.len(),
             stars,
@@ -78,13 +118,18 @@ impl<'a, 'b> Planner<'a, 'b> {
 // private methods.
 impl<'a, 'b> Planner<'a, 'b> {
     fn create_characteristic_ids(&self, roots: &[VId]) -> HashMap<Characteristic<'a, 'b>, usize> {
-        roots
-            .iter()
-            .map(|&root| Characteristic::new(self.pattern_graph, root))
-            .into_iter()
-            .enumerate()
-            .map(|(i, x)| (x, i))
-            .collect()
+        let mut id = 0;
+        let mut characteristic_ids = HashMap::with_capacity(roots.len());
+        for &root in roots {
+            characteristic_ids
+                .entry(Characteristic::new(self.pattern_graph, root))
+                .or_insert_with(|| {
+                    let myid = id;
+                    id += 1;
+                    myid
+                });
+        }
+        characteristic_ids
     }
 
     fn create_stars(
@@ -661,8 +706,10 @@ impl JoinInfo {
 pub struct Plan<'a, 'b> {
     data_graph: &'a DataGraph,
     pattern_graph: &'a PatternGraph<'b>,
-    super_row_mm_type: MemoryManagerType,
-    super_row_mm_len: usize,
+    star_sr_mm_type: MemoryManagerType,
+    join_sr_mm_type: MemoryManagerType,
+    star_sr_mms_len: usize,
+    join_sr_mms_len: usize,
     index_mm_type: MemoryManagerType,
     index_mm_len: usize,
     stars: Vec<StarInfo<'a, 'b>>,
@@ -702,7 +749,7 @@ impl<'a, 'b> Plan<'a, 'b> {
     /// Returns `(super_row_mms, index_mms)`.
     pub fn allocate(&self) -> (Vec<MemoryManager>, Vec<MemoryManager>) {
         (
-            self.create_super_row_mms(self.super_row_mm_len),
+            self.create_super_row_mms(self.star_sr_mms_len + self.join_sr_mms_len),
             self.create_index_mms(self.index_mm_len),
         )
     }
@@ -712,12 +759,18 @@ impl<'a, 'b> Plan<'a, 'b> {
 impl<'a, 'b> Plan<'a, 'b> {
     fn create_super_row_mms(&self, count: usize) -> Vec<MemoryManager> {
         (0..count)
-            .map(|id| match &self.super_row_mm_type {
-                MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
-                MemoryManagerType::Mmap(path) => {
-                    MemoryManager::Mmap(MmapFile::new(path.join(format!("{}.sr", id))))
+            .map(|id| {
+                match if id < self.star_sr_mms_len {
+                    &self.star_sr_mm_type
+                } else {
+                    &self.join_sr_mm_type
+                } {
+                    MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
+                    MemoryManagerType::Mmap(path) => {
+                        MemoryManager::Mmap(MmapFile::new(path.join(format!("{}.sr", id))))
+                    }
+                    MemoryManagerType::Sink => MemoryManager::Sink,
                 }
-                MemoryManagerType::Sink => MemoryManager::Sink,
             })
             .collect()
     }
@@ -732,6 +785,232 @@ impl<'a, 'b> Plan<'a, 'b> {
                 MemoryManagerType::Sink => MemoryManager::Sink,
             })
             .collect()
+    }
+
+    fn fmt_stars(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.stars().is_empty() {
+            writeln!(f, "Stars")?;
+            for (star_id, star) in self.stars().iter().enumerate() {
+                writeln!(f, "  Star{} [{}]", star_id, star.id())?;
+                let mut eqv_vertices: BTreeMap<usize, BTreeSet<VId>> = BTreeMap::new();
+                for (&v, &eqv) in star.vertex_eqv() {
+                    eqv_vertices.entry(eqv).or_default().insert(v);
+                }
+                for (&eqv, vertices) in eqv_vertices.iter().take(1) {
+                    writeln!(
+                        f,
+                        "    eqv{} {:?} ({}){}",
+                        eqv,
+                        vertices
+                            .iter()
+                            .map(|v| format!("u{}", v))
+                            .collect::<Vec<_>>(),
+                        star.characteristic().root_vlabel(),
+                        if let Some(vc) = star.characteristic().root_constraint() {
+                            format!(" {:?}", vc)
+                        } else {
+                            String::from("")
+                        }
+                    )?;
+                }
+                for ((&eqv, vertices), &info) in eqv_vertices
+                    .iter()
+                    .skip(1)
+                    .zip(star.characteristic().infos())
+                {
+                    writeln!(
+                        f,
+                        "    eqv{} {:?} ({}){}{}",
+                        eqv,
+                        vertices
+                            .iter()
+                            .map(|v| format!("u{}", v))
+                            .collect::<Vec<_>>(),
+                        info.vlabel(),
+                        if let Some(vc) = info.neighbor_constraint() {
+                            format!(" {:?}", vc)
+                        } else {
+                            String::from("")
+                        },
+                        if let Some(ec) = info.edge_constraint() {
+                            format!(" {:?}", ec)
+                        } else {
+                            String::from("")
+                        }
+                    )?;
+                    if !info.v_to_n_elabels().is_empty() {
+                        writeln!(f, "      v->n {:?}", info.v_to_n_elabels())?;
+                    }
+                    if !info.n_to_v_elabels().is_empty() {
+                        writeln!(f, "      v<-n {:?}", info.n_to_v_elabels())?;
+                    }
+                    if !info.undirected_elabels().is_empty() {
+                        writeln!(f, "      v--n {:?}", info.undirected_elabels())?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn fmt_stars_plan(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.stars_plan().is_empty() {
+            writeln!(f, "Stars Plan")?;
+            for (vlabel, cinfos) in self.stars_plan() {
+                writeln!(f, "  ({})", vlabel)?;
+                for cinfo in cinfos {
+                    writeln!(f, "    Characteristic [{}]", cinfo.id())?;
+                    writeln!(
+                        f,
+                        "      eqv0 ({}){}",
+                        cinfo.characteristic().root_vlabel(),
+                        if let Some(vc) = cinfo.characteristic().root_constraint() {
+                            format!(" {:?}", vc)
+                        } else {
+                            String::from("")
+                        }
+                    )?;
+                    for (i, ninfo) in cinfo.characteristic().infos().iter().enumerate() {
+                        writeln!(
+                            f,
+                            "      eqv{} ({}){}{}",
+                            i + 1,
+                            ninfo.vlabel(),
+                            if let Some(vc) = ninfo.neighbor_constraint() {
+                                format!(" {:?}", vc)
+                            } else {
+                                String::from("")
+                            },
+                            if let Some(ec) = ninfo.edge_constraint() {
+                                format!(" {:?}", ec)
+                            } else {
+                                String::from("")
+                            }
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn fmt_join_plan(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.join_plan().is_empty() {
+            writeln!(f, "Join Plan")?;
+            for info in self.join_plan() {
+                writeln!(
+                    f,
+                    "  Join [{}] = [{}] x [{}]",
+                    info.id(),
+                    info.left_id(),
+                    info.right_id()
+                )?;
+                let mut eqv_vertices = vec![BTreeSet::new(); info.num_eqv()];
+                for (&v, &eqv) in info.vertex_eqv() {
+                    eqv_vertices[eqv].insert(v);
+                }
+                let mut new_eqv = info.vertex_cover().len() - 1;
+                writeln!(
+                    f,
+                    "    indexed intersection {:?} = [{}]eqv{} x [{}]eqv0",
+                    eqv_vertices[new_eqv]
+                        .iter()
+                        .map(|v| format!("u{}", v))
+                        .collect::<Vec<_>>(),
+                    info.left_id(),
+                    info.indexed_intersection(),
+                    info.right_id()
+                )?;
+                new_eqv += 1;
+                writeln!(
+                    f,
+                    "    vertex cover {:?}{}",
+                    info.vertex_cover()
+                        .iter()
+                        .map(|v| format!("u{}", v))
+                        .collect::<Vec<_>>(),
+                    if let Some(vcc) = info.vertex_cover_constraint() {
+                        format!(" {:?}", vcc)
+                    } else {
+                        String::from("")
+                    }
+                )?;
+                if !info.sequential_intersections().is_empty() {
+                    writeln!(f, "    sequential intersections:")?;
+                    for (left, right, vcc) in info.sequential_intersections() {
+                        writeln!(
+                            f,
+                            "      {:?} = [{}]eqv{} x [{}]eqv{}{}",
+                            eqv_vertices[new_eqv]
+                                .iter()
+                                .map(|v| format!("u{}", v))
+                                .collect::<Vec<_>>(),
+                            info.left_id(),
+                            left,
+                            info.right_id(),
+                            right,
+                            if let Some(vcc) = vcc {
+                                format!(" {:?}", vcc)
+                            } else {
+                                String::from("")
+                            }
+                        )?;
+                        new_eqv += 1;
+                    }
+                }
+                if !info.left_keeps().is_empty() {
+                    writeln!(f, "    left keeps")?;
+                    for (eqv, vcc) in info.left_keeps() {
+                        writeln!(
+                            f,
+                            "      {:?} = [{}]eqv{}{}",
+                            eqv_vertices[new_eqv]
+                                .iter()
+                                .map(|v| format!("u{}", v))
+                                .collect::<Vec<_>>(),
+                            info.left_id(),
+                            eqv,
+                            if let Some(vcc) = vcc {
+                                format!(" {:?}", vcc)
+                            } else {
+                                String::from("")
+                            }
+                        )?;
+                        new_eqv += 1;
+                    }
+                }
+                if !info.right_keeps().is_empty() {
+                    writeln!(f, "    right keeps")?;
+                    for (eqv, vcc) in info.right_keeps() {
+                        writeln!(
+                            f,
+                            "      {:?} = [{}]eqv{}{}",
+                            eqv_vertices[new_eqv]
+                                .iter()
+                                .map(|v| format!("u{}", v))
+                                .collect::<Vec<_>>(),
+                            info.left_id(),
+                            eqv,
+                            if let Some(vcc) = vcc {
+                                format!(" {:?}", vcc)
+                            } else {
+                                String::from("")
+                            }
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a, 'b> std::fmt::Display for Plan<'a, 'b> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_stars(f)?;
+        self.fmt_stars_plan(f)?;
+        self.fmt_join_plan(f)?;
+        Ok(())
     }
 }
 

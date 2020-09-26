@@ -8,10 +8,22 @@ subcommands:
       args:
         - SQLITE3:
             required: true
-        - FILE:
+        - DATAGRAPH:
             required: true
+      after_help: >
+        The SQLite3 file must contain the following schema:
+
+          CREATE TABLE vertices (vid INT, vlabel INT);
+          CREATE TABLE edges (src INT, dst INT, elabel INT);
   - displaydb:
       about: Displays disk format of the data graph database file
       args:
-        - FILE:
+        - DATAGRAPH:
+            required: true
+  - plan:
+      about: Displays graph matching plan
+      args:
+        - DATAGRAPH:
+            required: true
+        - QUERY:
             required: true
