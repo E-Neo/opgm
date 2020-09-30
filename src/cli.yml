@@ -20,6 +20,44 @@ subcommands:
       args:
         - DATAGRAPH:
             required: true
+  - match:
+      about: Match the query in the data graph
+      args:
+        - DATAGRAPH:
+            required: true
+        - QUERY:
+            required: true
+        - db-in-memory:
+            help: Load the data graph database into memory before matching
+            long: db-in-memory
+            takes_value: false
+        - star-mm-type:
+            help: The MemoryManager for star matching results
+            long: star-mm-type
+            takes_value: true
+            default_value: mem
+            possible_values:
+              - mem
+              - mmap
+              - sink
+        - join-mm-type:
+            help: The MemoryManager for join results
+            long: join-mm-type
+            takes_value: true
+            default_value: mem
+            possible_values:
+              - mem
+              - mmap
+              - sink
+        - index-mm-type:
+            help: The MemoryManager for indices
+            long: index-mm-type
+            takes_value: true
+            default_value: mem
+            possible_values:
+              - mem
+              - mmap
+              - sink
   - plan:
       about: Displays graph matching plan
       args:

@@ -4,15 +4,16 @@ use crate::{
     compiler::{
         ast::Expr,
         generator::{
-            extract_global_constraint, extract_vertex_cover_constraint, extract_vertices,
-            EdgeConstraintsInfo, VertexConstraintsInfo,
+            extract_vertex_cover_constraint, extract_vertices, EdgeConstraintsInfo,
+            VertexConstraintsInfo,
         },
     },
     data_graph::DataGraph,
+    executor::{join, match_characteristics},
     memory_manager::{MemoryManager, MmapFile},
     pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
     planner::decompose_stars,
-    types::{GlobalConstraint, VId, VLabel, VertexCoverConstraint},
+    types::{VId, VLabel, VertexCoverConstraint},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
@@ -76,17 +77,17 @@ impl<'a, 'b> Planner<'a, 'b> {
         }
     }
 
-    pub fn star_sr_mm_type(&mut self, mm_type: MemoryManagerType) -> &mut Self {
+    pub fn star_sr_mm_type(mut self, mm_type: MemoryManagerType) -> Self {
         self.star_sr_mm_type = mm_type;
         self
     }
 
-    pub fn join_sr_mm_type(&mut self, mm_type: MemoryManagerType) -> &mut Self {
+    pub fn join_sr_mm_type(mut self, mm_type: MemoryManagerType) -> Self {
         self.join_sr_mm_type = mm_type;
         self
     }
 
-    pub fn index_mm_type(&mut self, mm_type: MemoryManagerType) -> &mut Self {
+    pub fn index_mm_type(mut self, mm_type: MemoryManagerType) -> Self {
         self.index_mm_type = mm_type;
         self
     }
@@ -360,9 +361,8 @@ pub struct JoinInfo {
     left_id: usize,
     right_id: usize,
     vertex_cover: Vec<VId>,
-    num_eqv: usize,
+    num_eqvs: usize,
     vertex_eqv: HashMap<VId, usize>,
-    vertex_cover_constraint: Option<GlobalConstraint>,
     /// left_eqv
     indexed_intersection: usize,
     /// (left_eqv, right_eqv, constraint)
@@ -395,18 +395,13 @@ impl JoinInfo {
     }
 
     /// Number of equivalence classes.
-    pub fn num_eqv(&self) -> usize {
-        self.num_eqv
+    pub fn num_eqvs(&self) -> usize {
+        self.num_eqvs
     }
 
     /// The mapping from the vertex to the equivalence class id `eqv`.
     pub fn vertex_eqv(&self) -> &HashMap<VId, usize> {
         &self.vertex_eqv
-    }
-
-    /// The vertex cover's global constraint.
-    pub fn vertex_cover_constraint(&self) -> &Option<GlobalConstraint> {
-        &self.vertex_cover_constraint
     }
 
     /// The `left_eqv` to apply the index-based join.
@@ -440,8 +435,7 @@ impl JoinInfo {
     ) -> Self {
         let (
             vertex_eqv,
-            num_eqv,
-            vertex_cover_constraint,
+            num_eqvs,
             indexed_intersection,
             sequential_intersections,
             left_keeps,
@@ -458,8 +452,7 @@ impl JoinInfo {
                 .chain(std::iter::once(right.root()))
                 .collect(),
             vertex_eqv,
-            num_eqv,
-            vertex_cover_constraint,
+            num_eqvs,
             indexed_intersection,
             sequential_intersections,
             left_keeps,
@@ -474,7 +467,6 @@ impl JoinInfo {
     ) -> (
         HashMap<VId, usize>,
         usize,
-        Option<GlobalConstraint>,
         usize,
         Vec<(usize, usize, Option<VertexCoverConstraint>)>,
         Vec<(usize, Option<VertexCoverConstraint>)>,
@@ -491,8 +483,6 @@ impl JoinInfo {
             .collect();
         vertex_eqv.insert(right.root(), vertex_eqv.len());
         let vertex_cover_eqv = vertex_eqv.clone();
-        let vertex_cover_constraint =
-            extract_global_constraint(global_constraints, &vertex_cover_eqv);
         let mut eqv = vertex_eqv.len(); // eqv == vertex_eqv.len() only at this point.
         let indexed_intersection = Self::create_indexed_intersection(left, right);
         let sequential_intersection = Self::create_sequential_intersections(
@@ -526,7 +516,6 @@ impl JoinInfo {
         (
             vertex_eqv,
             eqv,
-            vertex_cover_constraint,
             indexed_intersection,
             sequential_intersection,
             left_keep,
@@ -753,6 +742,39 @@ impl<'a, 'b> Plan<'a, 'b> {
             self.create_index_mms(self.index_mm_len),
         )
     }
+
+    pub fn execute_stars_matching(
+        &self,
+        super_row_mms: &mut [MemoryManager],
+        index_mms: &mut [MemoryManager],
+    ) {
+        self.stars_plan().iter().for_each(|(vlabel, infos)| {
+            match_characteristics(self.data_graph, *vlabel, infos, super_row_mms, index_mms)
+        });
+    }
+
+    pub fn execute_join(&self, super_row_mms: &mut [MemoryManager], index_mms: &[MemoryManager]) {
+        self.join_plan().iter().for_each(|info| {
+            let (wrote_mms, mms) = super_row_mms.split_at_mut(info.id());
+            join(
+                &mut mms[0],
+                info.num_eqvs(),
+                info.vertex_cover().len(),
+                &wrote_mms[info.left_id()],
+                &wrote_mms[info.right_id()],
+                &index_mms[info.right_id()],
+                info.indexed_intersection(),
+                info.sequential_intersections(),
+                info.left_keeps(),
+                info.right_keeps(),
+            );
+        });
+    }
+
+    pub fn execute(&self, super_row_mms: &mut [MemoryManager], index_mms: &mut [MemoryManager]) {
+        self.execute_stars_matching(super_row_mms, index_mms);
+        self.execute_join(super_row_mms, index_mms);
+    }
 }
 
 // private methods.
@@ -905,7 +927,7 @@ impl<'a, 'b> Plan<'a, 'b> {
                     info.left_id(),
                     info.right_id()
                 )?;
-                let mut eqv_vertices = vec![BTreeSet::new(); info.num_eqv()];
+                let mut eqv_vertices = vec![BTreeSet::new(); info.num_eqvs()];
                 for (&v, &eqv) in info.vertex_eqv() {
                     eqv_vertices[eqv].insert(v);
                 }
@@ -924,16 +946,11 @@ impl<'a, 'b> Plan<'a, 'b> {
                 new_eqv += 1;
                 writeln!(
                     f,
-                    "    vertex cover {:?}{}",
+                    "    vertex cover {:?}",
                     info.vertex_cover()
                         .iter()
                         .map(|v| format!("u{}", v))
                         .collect::<Vec<_>>(),
-                    if let Some(vcc) = info.vertex_cover_constraint() {
-                        format!(" {:?}", vcc)
-                    } else {
-                        String::from("")
-                    }
                 )?;
                 if !info.sequential_intersections().is_empty() {
                     writeln!(f, "    sequential intersections:")?;
@@ -1086,7 +1103,7 @@ mod tests {
         let star_info2 = StarInfo::new(&pattern_graph, 1, 1);
         let join_info = JoinInfo::new(&mut vec![], &star_info1, &star_info2, 2);
         assert_eq!(join_info.vertex_cover(), &[0, 1]);
-        assert_eq!(join_info.num_eqv(), 4);
+        assert_eq!(join_info.num_eqvs(), 4);
         assert_eq!(
             join_info.vertex_eqv(),
             &vec![(0, 0), (1, 1), (2, 2), (3, 3)]
