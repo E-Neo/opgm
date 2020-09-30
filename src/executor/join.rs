@@ -3,7 +3,7 @@ use crate::{
         read_super_row_header, write_num_bytes, write_super_row_header, SuperRow, SuperRows,
     },
     memory_manager::MemoryManager,
-    types::{GlobalConstraint, PosLen, SuperRowHeader, VId, VIdPos, VertexCoverConstraint},
+    types::{PosLen, SuperRowHeader, VId, VIdPos, VertexCoverConstraint},
 };
 use std::cmp::Ordering;
 use std::mem::size_of;
@@ -24,40 +24,23 @@ pub fn join(
     left_super_row_mm: &MemoryManager,
     right_super_row_mm: &MemoryManager,
     index_mm: &MemoryManager,
-    vertex_cover_constraint: &Option<GlobalConstraint>,
     indexed_intersection: usize,
     sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
     left_keeps: &[(usize, Option<VertexCoverConstraint>)],
     right_keeps: &[(usize, Option<VertexCoverConstraint>)],
 ) {
-    if let Some(vcgc) = vertex_cover_constraint {
-        do_join_with_vcgc(
-            super_row_mm,
-            num_eqvs,
-            num_cover,
-            left_super_row_mm,
-            right_super_row_mm,
-            index_mm,
-            vcgc,
-            indexed_intersection,
-            sequential_intersections,
-            left_keeps,
-            right_keeps,
-        );
-    } else {
-        do_join(
-            super_row_mm,
-            num_eqvs,
-            num_cover,
-            left_super_row_mm,
-            right_super_row_mm,
-            index_mm,
-            indexed_intersection,
-            sequential_intersections,
-            left_keeps,
-            right_keeps,
-        );
-    }
+    do_join(
+        super_row_mm,
+        num_eqvs,
+        num_cover,
+        left_super_row_mm,
+        right_super_row_mm,
+        index_mm,
+        indexed_intersection,
+        sequential_intersections,
+        left_keeps,
+        right_keeps,
+    );
 }
 
 /// Do join without vertex cover's global constraint.
@@ -95,50 +78,6 @@ fn do_join(
                     right_keeps,
                 );
                 num_rows += 1;
-            }
-        }
-    }
-    write_super_row_header(super_row_mm, num_rows, num_eqvs, num_cover);
-}
-
-/// Do join with vertex cover's global constraint.
-fn do_join_with_vcgc(
-    super_row_mm: &mut MemoryManager,
-    num_eqvs: usize,
-    num_cover: usize,
-    left_super_row_mm: &MemoryManager,
-    right_super_row_mm: &MemoryManager,
-    index_mm: &MemoryManager,
-    vcgc: &GlobalConstraint,
-    indexed_intersection: usize,
-    sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
-    left_keeps: &[(usize, Option<VertexCoverConstraint>)],
-    right_keeps: &[(usize, Option<VertexCoverConstraint>)],
-) {
-    let (_, right_num_eqvs, _) = read_super_row_header(right_super_row_mm);
-    let index = index_mm.read_slice::<VIdPos>(0, index_mm.len() / size_of::<VIdPos>());
-    super_row_mm.resize(size_of::<SuperRowHeader>());
-    let mut num_rows = 0;
-    for left_sr in SuperRows::new(left_super_row_mm) {
-        for &root in left_sr.images()[indexed_intersection] {
-            if let Some(right_sr_pos) = index_get_pos(index, root) {
-                let vc = get_vertex_cover(num_cover, &left_sr, root);
-                if vcgc.f()(&vc) {
-                    let right_sr = SuperRow::new(right_super_row_mm, right_sr_pos, right_num_eqvs);
-                    join_two_super_rows(
-                        super_row_mm,
-                        num_eqvs,
-                        num_cover,
-                        &vc,
-                        &left_sr,
-                        &right_sr,
-                        root,
-                        sequential_intersections,
-                        left_keeps,
-                        right_keeps,
-                    );
-                    num_rows += 1;
-                }
             }
         }
     }
@@ -467,7 +406,6 @@ mod tests {
             &sr1_mm,
             &sr2_mm,
             &index_mm,
-            &None,
             1,
             &[(2, 1, None)],
             &[],
