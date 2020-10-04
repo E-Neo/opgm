@@ -1078,6 +1078,17 @@ mod tests {
         p
     }
 
+    fn create_pattern_graph2<'a>() -> PatternGraph<'a> {
+        let mut p = PatternGraph::new();
+        for (vid, vlabel) in vec![(1, 0), (2, 1), (3, 2), (4, 1), (5, 0)] {
+            p.add_vertex(vid, vlabel);
+        }
+        for (u1, u2, elabel) in vec![(1, 2, 0), (1, 3, 0), (5, 2, 0), (5, 4, 0)] {
+            p.add_arc(u1, u2, elabel);
+        }
+        p
+    }
+
     #[test]
     fn test_stars_plan() {
         let data_graph = create_data_graph();
@@ -1093,6 +1104,41 @@ mod tests {
                     0
                 )]
             )]
+        );
+    }
+
+    #[test]
+    fn test_stars_plan2() {
+        let data_graph = create_data_graph();
+        let pattern_graph = create_pattern_graph2();
+        let mut global_constraints = vec![];
+        let plan = Planner::new(&data_graph, &pattern_graph, &mut global_constraints).plan();
+        assert_eq!(
+            plan.stars(),
+            &[
+                StarInfo::new(&pattern_graph, 1, 0),
+                StarInfo::new(&pattern_graph, 2, 1),
+                StarInfo::new(&pattern_graph, 5, 2)
+            ]
+        );
+        assert_eq!(
+            plan.stars_plan(),
+            &[
+                (
+                    0,
+                    vec![
+                        CharacteristicInfo::new(Characteristic::new(&pattern_graph, 1), 0),
+                        CharacteristicInfo::new(Characteristic::new(&pattern_graph, 5), 2)
+                    ]
+                ),
+                (
+                    1,
+                    vec![CharacteristicInfo::new(
+                        Characteristic::new(&pattern_graph, 2),
+                        1
+                    )]
+                )
+            ]
         );
     }
 

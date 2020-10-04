@@ -9,6 +9,7 @@ use opgm::{
 use std::error::Error;
 use std::fs::File;
 use std::io::Read;
+use std::path::PathBuf;
 
 #[derive(Debug, Display, PartialEq)]
 enum Err {
@@ -47,9 +48,18 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     let mut task = Task::new(&data_graph, pattern_graph, &vc_info, &ec_info, gcs);
     let plan = task
         .prepare()
-        .star_sr_mm_type(parse_mm_type(matches.value_of("star-mm-type").unwrap()))
-        .join_sr_mm_type(parse_mm_type(matches.value_of("join-mm-type").unwrap()))
-        .index_mm_type(parse_mm_type(matches.value_of("index-mm-type").unwrap()))
+        .star_sr_mm_type(parse_mm_type(
+            matches.value_of("star-mm-type").unwrap(),
+            matches.value_of("directory"),
+        ))
+        .join_sr_mm_type(parse_mm_type(
+            matches.value_of("join-mm-type").unwrap(),
+            matches.value_of("directory"),
+        ))
+        .index_mm_type(parse_mm_type(
+            matches.value_of("index-mm-type").unwrap(),
+            matches.value_of("directory"),
+        ))
         .plan();
     let (mut super_row_mms, mut index_mms) = plan.allocate();
     plan.execute(&mut super_row_mms, &mut index_mms);
@@ -72,9 +82,10 @@ fn handle_plan(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn parse_mm_type(mm_type: &str) -> MemoryManagerType {
+fn parse_mm_type(mm_type: &str, directory: Option<&str>) -> MemoryManagerType {
     match mm_type {
         "mem" => MemoryManagerType::Mem,
+        "mmap" => MemoryManagerType::Mmap(PathBuf::from(directory.unwrap())),
         "sink" => MemoryManagerType::Sink,
         _ => panic!("Invalid mm-type"),
     }

@@ -31,11 +31,20 @@ subcommands:
             help: Load the data graph database into memory before matching
             long: db-in-memory
             takes_value: false
+        - directory:
+            help: Prefix memory mapped files with this directory
+            long: directory
+            takes_value: true
+            default_value: /tmp
+            required_ifs:
+              - [star-mm-type, mmap]
+              - [join-mm-type, mmap]
+              - [index-mm-type, mmap]
         - star-mm-type:
             help: The MemoryManager for star matching results
             long: star-mm-type
             takes_value: true
-            default_value: mem
+            default_value: mmap
             possible_values:
               - mem
               - mmap
@@ -44,7 +53,7 @@ subcommands:
             help: The MemoryManager for join results
             long: join-mm-type
             takes_value: true
-            default_value: mem
+            default_value: mmap
             possible_values:
               - mem
               - mmap
@@ -53,7 +62,7 @@ subcommands:
             help: The MemoryManager for indices
             long: index-mm-type
             takes_value: true
-            default_value: mem
+            default_value: mmap
             possible_values:
               - mem
               - mmap

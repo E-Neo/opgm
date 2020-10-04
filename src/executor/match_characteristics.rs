@@ -23,10 +23,11 @@ pub fn match_characteristics(
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
 ) {
+    let ids: Vec<usize> = infos.iter().enumerate().map(|(id, _)| id).collect();
     let (vertices_len, vertices) = data_graph.vertices(vlabel);
-    initialize_results(infos, super_row_mms, index_mms, vertices_len);
-    let sr_pos_idx_poses = scan_data_vertices(vertices, infos, super_row_mms, index_mms);
-    finish_results(infos, super_row_mms, index_mms, &sr_pos_idx_poses);
+    initialize_results(&ids, super_row_mms, index_mms, vertices_len);
+    let sr_pos_idx_poses = scan_data_vertices(vertices, &ids, infos, super_row_mms, index_mms);
+    finish_results(&ids, infos, super_row_mms, index_mms, &sr_pos_idx_poses);
 }
 
 /// Allocate space for `SuperRowHeader` and the indices.
@@ -37,14 +38,18 @@ pub fn match_characteristics(
 /// by [`vertices()`](../data_graph/struct.DataGraph.html#method.vertices),
 /// so it could be allocate once for all.
 fn initialize_results(
-    infos: &[CharacteristicInfo],
+    ids: &[usize],
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
     vertices_len: usize,
 ) {
-    infos.iter().map(|info| info.id()).for_each(|id| {
-        super_row_mms[id].resize(size_of::<SuperRowHeader>());
-        index_mms[id].resize(vertices_len * size_of::<VIdPos>());
+    ids.iter().for_each(|&id| unsafe {
+        super_row_mms
+            .get_unchecked_mut(id)
+            .resize(size_of::<SuperRowHeader>());
+        index_mms
+            .get_unchecked_mut(id)
+            .resize(vertices_len * size_of::<VIdPos>());
     });
 }
 
@@ -57,6 +62,7 @@ fn initialize_results(
 /// Though it is a little bit dirty, it works fine as an internal interface.
 fn scan_data_vertices<'a, VS>(
     vertices: VS,
+    ids: &[usize],
     infos: &[CharacteristicInfo],
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
@@ -68,6 +74,7 @@ where
     for vertex in vertices {
         match_data_vertex(
             &vertex,
+            ids,
             infos,
             super_row_mms,
             index_mms,
@@ -85,13 +92,20 @@ where
 /// sequentially only once.
 fn match_data_vertex(
     vertex: &DataVertex,
+    ids: &[usize],
     infos: &[CharacteristicInfo],
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
     sr_pos_idx_poses: &mut [(usize, usize)],
 ) {
-    let id_sr_pos_eqv_poses =
-        get_characteristic_candidates(vertex, infos, super_row_mms, sr_pos_idx_poses, index_mms);
+    let id_sr_pos_eqv_poses = get_characteristic_candidates(
+        vertex,
+        ids,
+        infos,
+        super_row_mms,
+        sr_pos_idx_poses,
+        index_mms,
+    );
     let nlabel_ids =
         group_characteristics_by_nlabel(id_sr_pos_eqv_poses.keys().map(|&id| id), infos);
     let (mut left_iter, mut right_iter) = (vertex.vlabels(), nlabel_ids.iter());
@@ -255,15 +269,14 @@ fn check_neighbor_edges(neighbor: &DataNeighbor, info: &NeighborInfo) -> bool {
 /// The index is also updated by this function.
 fn get_characteristic_candidates(
     vertex: &DataVertex,
+    ids: &[usize],
     infos: &[CharacteristicInfo],
     super_row_mms: &mut [MemoryManager],
     sr_pos_idx_poses: &mut [(usize, usize)],
     index_mms: &mut [MemoryManager],
 ) -> HashMap<usize, (usize, Vec<usize>)> {
-    infos
-        .iter()
-        .map(|info| info.id())
-        .filter_map(|id| {
+    ids.iter()
+        .filter_map(|&id| {
             unsafe { infos.get_unchecked(id) }
                 .characteristic()
                 .root_constraint()
@@ -370,21 +383,22 @@ fn allocate(
 
 /// Update the `SuperRowHeader` and truncate `super_row_mm` and `index_mm` in `ids`.
 fn finish_results(
+    ids: &[usize],
     infos: &[CharacteristicInfo],
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
     sr_pos_idx_poses: &[(usize, usize)],
 ) {
-    infos.iter().for_each(|info| {
-        let &(sr_pos, idx_pos) = &sr_pos_idx_poses[info.id()];
+    ids.iter().for_each(|&id| unsafe {
+        let &(sr_pos, idx_pos) = sr_pos_idx_poses.get_unchecked(id);
         write_super_row_header(
-            &mut super_row_mms[info.id()],
+            super_row_mms.get_unchecked_mut(id),
             idx_pos / size_of::<VIdPos>(),
-            info.characteristic().infos().len() + 1,
+            infos.get_unchecked(id).characteristic().infos().len() + 1,
             1,
         );
-        super_row_mms[info.id()].resize(sr_pos);
-        index_mms[info.id()].resize(idx_pos);
+        super_row_mms.get_unchecked_mut(id).resize(sr_pos);
+        index_mms.get_unchecked_mut(id).resize(idx_pos);
     });
 }
 
@@ -456,7 +470,7 @@ mod tests {
         let pattern_graph = create_pattern_graph();
         let infos = vec![
             CharacteristicInfo::new(Characteristic::new(&pattern_graph, 1), 0),
-            CharacteristicInfo::new(Characteristic::new(&pattern_graph, 5), 1),
+            CharacteristicInfo::new(Characteristic::new(&pattern_graph, 5), 2),
         ];
         let mut super_row_mms = vec![MemoryManager::Mem(vec![]), MemoryManager::Mem(vec![])];
         let mut index_mms = vec![MemoryManager::Mem(vec![]), MemoryManager::Mem(vec![])];
