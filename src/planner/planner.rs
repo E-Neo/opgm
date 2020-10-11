@@ -4,18 +4,19 @@ use crate::{
     compiler::{
         ast::Expr,
         generator::{
-            extract_vertex_cover_constraint, extract_vertices, EdgeConstraintsInfo,
-            VertexConstraintsInfo,
+            extract_global_constraint, extract_vertex_cover_constraint, extract_vertices,
+            EdgeConstraintsInfo, VertexConstraintsInfo,
         },
     },
     data_graph::DataGraph,
-    executor::{join, match_characteristics},
+    executor::{decompress, join, match_characteristics, write_results},
     memory_manager::{MemoryManager, MmapFile},
     pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
     planner::decompose_stars,
-    types::{VId, VLabel, VertexCoverConstraint},
+    types::{GlobalConstraint, VId, VLabel, VertexCoverConstraint},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::io::Write;
 use std::path::PathBuf;
 
 pub enum MemoryManagerType {
@@ -100,6 +101,18 @@ impl<'a, 'b> Planner<'a, 'b> {
         let mut global_constraints = std::mem::replace(self.global_constraints, vec![]);
         let join_plan =
             self.create_join_plan(&stars, characteristic_ids.len(), &mut global_constraints);
+        let global_constraint = if stars.is_empty() {
+            None
+        } else {
+            extract_global_constraint(
+                &mut global_constraints,
+                if join_plan.is_empty() {
+                    stars.last().unwrap().vertex_eqv()
+                } else {
+                    join_plan.last().unwrap().vertex_eqv()
+                },
+            )
+        };
         Plan {
             data_graph: self.data_graph,
             pattern_graph: self.pattern_graph,
@@ -112,6 +125,7 @@ impl<'a, 'b> Planner<'a, 'b> {
             stars,
             stars_plan,
             join_plan,
+            global_constraint,
         }
     }
 }
@@ -704,6 +718,7 @@ pub struct Plan<'a, 'b> {
     stars: Vec<StarInfo<'a, 'b>>,
     stars_plan: Vec<(VLabel, Vec<CharacteristicInfo<'a, 'b>>)>,
     join_plan: Vec<JoinInfo>,
+    global_constraint: Option<GlobalConstraint>,
 }
 
 impl<'a, 'b> Plan<'a, 'b> {
@@ -733,6 +748,10 @@ impl<'a, 'b> Plan<'a, 'b> {
 
     pub fn join_plan(&self) -> &[JoinInfo] {
         &self.join_plan
+    }
+
+    pub fn global_constraint(&self) -> &Option<GlobalConstraint> {
+        &self.global_constraint
     }
 
     /// Returns `(super_row_mms, index_mms)`.
@@ -771,9 +790,38 @@ impl<'a, 'b> Plan<'a, 'b> {
         });
     }
 
-    pub fn execute(&self, super_row_mms: &mut [MemoryManager], index_mms: &mut [MemoryManager]) {
+    pub fn execute_write_results(
+        &self,
+        writer: &mut dyn Write,
+        super_row_mms: &[MemoryManager],
+    ) -> std::io::Result<()> {
+        let vertex_eqv = if self.stars().is_empty() {
+            return Ok(());
+        } else if self.join_plan().is_empty() {
+            self.stars().last().unwrap().vertex_eqv()
+        } else {
+            self.join_plan().last().unwrap().vertex_eqv()
+        };
+        let super_row_mm = super_row_mms.last().unwrap();
+        let mut vertex_eqv: Vec<(VId, usize)> = vertex_eqv
+            .iter()
+            .map(|(&vertex, &eqv)| (vertex, eqv))
+            .collect();
+        vertex_eqv.sort();
+        let rows = decompress(super_row_mm, &vertex_eqv);
+        write_results(writer, rows, &vertex_eqv, self.global_constraint())?;
+        Ok(())
+    }
+
+    pub fn execute(
+        &self,
+        writer: &mut dyn Write,
+        super_row_mms: &mut [MemoryManager],
+        index_mms: &mut [MemoryManager],
+    ) -> std::io::Result<()> {
         self.execute_stars_matching(super_row_mms, index_mms);
         self.execute_join(super_row_mms, index_mms);
+        self.execute_write_results(writer, super_row_mms)
     }
 }
 

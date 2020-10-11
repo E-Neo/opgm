@@ -62,7 +62,7 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         ))
         .plan();
     let (mut super_row_mms, mut index_mms) = plan.allocate();
-    plan.execute(&mut super_row_mms, &mut index_mms);
+    plan.execute(&mut std::io::stdout(), &mut super_row_mms, &mut index_mms)?;
     Ok(())
 }
 

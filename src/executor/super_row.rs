@@ -2,6 +2,7 @@ use crate::{
     memory_manager::MemoryManager,
     types::{PosLen, SuperRowHeader, VId, VIdPos},
 };
+use std::collections::HashSet;
 use std::mem::size_of;
 
 pub struct SuperRow<'a> {
@@ -20,6 +21,59 @@ impl<'a> SuperRow<'a> {
 
     pub fn images(&self) -> &[&'a [VId]] {
         self.images.as_slice()
+    }
+
+    /// Decompress the SuperRow.
+    ///
+    /// `vertex_eqv` should be sorted by `VId`.
+    pub fn decompress(self, vertex_eqv: &'a [(VId, usize)]) -> SuperRowIter {
+        let mappings = vertex_eqv
+            .iter()
+            .map(|(_, eqv)| self.images()[*eqv])
+            .collect();
+        SuperRowIter {
+            mappings,
+            mappings_offsets: vec![0; vertex_eqv.len()],
+            row: Vec::with_capacity(vertex_eqv.len()),
+            row_set: HashSet::with_capacity(vertex_eqv.len()),
+        }
+    }
+}
+
+pub struct SuperRowIter<'a> {
+    mappings: Vec<&'a [VId]>,
+    mappings_offsets: Vec<usize>,
+    row: Vec<VId>,
+    row_set: HashSet<VId>,
+}
+
+impl<'a> Iterator for SuperRowIter<'a> {
+    type Item = Vec<VId>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let col = self.row.len();
+            if col == self.mappings.len() {
+                let row = self.row.clone();
+                if let Some(v) = self.row.pop() {
+                    self.row_set.remove(&v);
+                }
+                return Some(row);
+            } else if self.mappings_offsets[col] < self.mappings[col].len() {
+                let v = self.mappings[col][self.mappings_offsets[col]];
+                if self.row_set.insert(v) {
+                    self.row.push(v);
+                }
+                self.mappings_offsets[col] += 1;
+            } else {
+                self.mappings_offsets[col] = 0;
+                if let Some(v) = self.row.pop() {
+                    self.row_set.remove(&v);
+                } else {
+                    return None;
+                }
+            }
+        }
     }
 }
 
