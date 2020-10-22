@@ -7,7 +7,7 @@ use crate::{
     types::{PosLen, SuperRowHeader, VId, VIdPos, VLabel},
 };
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::HashSet;
 use std::mem::size_of;
 
 /// Match the stars by matching the `characteristic`s.
@@ -62,12 +62,10 @@ where
     VS: IntoIterator<Item = DataVertex<'a>>,
 {
     let mut sr_pos_idx_poses = vec![(size_of::<SuperRowHeader>(), 0); index_mms.len()];
-    let nlabel_offsets = group_characteristic_by_nlabel(infos);
     for vertex in vertices {
         match_data_vertex(
             &vertex,
             infos,
-            &nlabel_offsets,
             super_row_mms,
             index_mms,
             &mut sr_pos_idx_poses,
@@ -76,154 +74,103 @@ where
     sr_pos_idx_poses
 }
 
-/// Returns the offset of `info` in `infos` groupped by nlabel.
-fn group_characteristic_by_nlabel(infos: &[CharacteristicInfo]) -> Vec<(VLabel, Vec<usize>)> {
-    let mut nlabel_offsets: BTreeMap<VLabel, BTreeSet<usize>> = BTreeMap::new();
-    infos.iter().enumerate().for_each(|(offset, info)| {
-        info.characteristic()
-            .infos()
-            .iter()
-            .map(|ninfo| ninfo.vlabel())
-            .for_each(|nlabel| {
-                nlabel_offsets.entry(nlabel).or_default().insert(offset);
-            });
-    });
-    nlabel_offsets
-        .into_iter()
-        .map(|(nlabel, offsets)| (nlabel, offsets.into_iter().collect()))
-        .collect()
-}
-
 /// Scan the `vertex` and its neighbors to match characteristics.
-///
-/// We first select characteristic candidates by early filters,
-/// i.e., root's vertex constraint and neighbors' labels.
-/// And then scan the neighbors of `vertex` at most once to match the characteristics.
 fn match_data_vertex(
     vertex: &DataVertex,
     infos: &[CharacteristicInfo],
-    nlabel_offsets: &[(VLabel, Vec<usize>)],
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
     sr_pos_idx_poses: &mut [(usize, usize)],
 ) {
-    let offset_sr_pos_eqv_poses =
-        get_characteristic_candidates(vertex, infos, super_row_mms, index_mms, sr_pos_idx_poses);
-    let nlabel_offsets: Vec<_> = nlabel_offsets
-        .iter()
-        .filter_map(|(nlabel, offsets)| {
-            let offsets: Vec<usize> = offsets
-                .iter()
-                .filter(|&&offset| offset_sr_pos_eqv_poses.contains_key(&offset))
-                .map(|&x| x)
-                .collect();
-            if offsets.is_empty() {
-                None
-            } else {
-                Some((*nlabel, offsets))
-            }
-        })
-        .collect();
-    let (mut left_iter, mut right_iter) = (vertex.vlabels(), nlabel_offsets.iter());
-    let (mut left, mut right) = (left_iter.next(), right_iter.next());
-    while let (Some(x), Some(y)) = (left, right) {
-        match x.0.cmp(&y.0) {
-            Ordering::Less => left = left_iter.next(),
-            Ordering::Equal => {
-                match_neighbors(
-                    vertex,
-                    x.0,
-                    x.2,
-                    y.1.as_slice(),
-                    infos,
-                    super_row_mms,
-                    &offset_sr_pos_eqv_poses,
-                );
-                left = left_iter.next();
-                right = right_iter.next();
-            }
-            Ordering::Greater => panic!("match_data_vertex"),
-        }
-    }
+    infos.iter().for_each(|info| {
+        match_data_vertex_for_one_info(
+            vertex,
+            info,
+            &mut super_row_mms[info.id()],
+            &mut index_mms[info.id()],
+            &mut sr_pos_idx_poses[info.id()],
+        );
+    });
 }
 
-/// Scan the neighbors and write them to the SuperRow files if matched.
-fn match_neighbors<'a, N>(
+fn match_data_vertex_for_one_info(
     vertex: &DataVertex,
-    nlabel: VLabel,
-    neighbors: N,
-    offsets: &[usize],
-    infos: &[CharacteristicInfo],
-    super_row_mms: &mut [MemoryManager],
-    offset_sr_pos_eqv_poses: &HashMap<usize, (usize, Vec<usize>)>,
-) where
-    N: IntoIterator<Item = DataNeighbor<'a>>,
-{
-    let offset_sr_pos_eqv_ninfo_poses =
-        get_offset_sr_pos_eqv_info_poses(nlabel, offsets, infos, offset_sr_pos_eqv_poses);
-    let mut offset_lens: Vec<Vec<usize>> = offset_sr_pos_eqv_ninfo_poses
-        .iter()
-        .map(|(_, (_, ninfo_poses))| ninfo_poses.iter().map(|_| 0).collect())
-        .collect();
-    for neighbor in neighbors {
-        for (i, (offset, (_, eqv_ninfo_poses))) in offset_sr_pos_eqv_ninfo_poses.iter().enumerate()
-        {
-            for (j, (_, ninfo, pos)) in eqv_ninfo_poses.iter().enumerate() {
-                if check_neighbor_constraints(vertex, &neighbor, ninfo)
-                    && check_neighbor_degrees(&neighbor, ninfo)
-                    && check_neighbor_edges(&neighbor, ninfo)
-                {
-                    write_vid(
-                        &mut super_row_mms[infos[*offset].id()],
-                        pos + offset_lens[i][j] * size_of::<VId>(),
-                        neighbor.id(),
+    info: &CharacteristicInfo,
+    super_row_mm: &mut MemoryManager,
+    index_mm: &mut MemoryManager,
+    sr_pos_idx_pos: &mut (usize, usize),
+) {
+    if let Some(vc) = info.characteristic().root_constraint() {
+        if !vc.f()(vertex.id()) {
+            return;
+        }
+    }
+    let &mut (sr_pos, idx_pos) = sr_pos_idx_pos;
+    if let Some((new_sr_pos, eqv_poses)) = allocate(super_row_mm, sr_pos, vertex, info) {
+        write_index(index_mm, idx_pos, vertex.id(), sr_pos);
+        *sr_pos_idx_pos = (new_sr_pos, idx_pos + size_of::<VIdPos>());
+        let (mut left_iter, mut right_iter) = (
+            vertex.vlabels(),
+            info.characteristic()
+                .infos()
+                .iter()
+                .zip(eqv_poses.iter().enumerate().skip(1)),
+        );
+        let (mut left, mut right) = (left_iter.next(), right_iter.next());
+        while let (Some((x, _, neighbors)), Some((&ninfo, (eqv, &pos)))) = (&left, &right) {
+            match (*x).cmp(&ninfo.vlabel()) {
+                Ordering::Less => {
+                    left = left_iter.next();
+                }
+                Ordering::Equal => {
+                    match_neighbors(
+                        vertex,
+                        neighbors.clone(),
+                        ninfo,
+                        super_row_mm,
+                        sr_pos,
+                        *eqv,
+                        pos,
                     );
-                    offset_lens[i][j] += 1;
+                    right = right_iter.next();
+                }
+                Ordering::Greater => {
+                    break;
                 }
             }
         }
     }
-    for ((offset, (sr_pos, eqv_ninfo_poses)), lens) in
-        offset_sr_pos_eqv_ninfo_poses.iter().zip(offset_lens.iter())
-    {
-        for (&(eqv, _, pos), &len) in eqv_ninfo_poses.iter().zip(lens) {
-            write_pos_len(
-                &mut super_row_mms[infos[*offset].id()],
-                *sr_pos,
-                eqv,
-                pos,
-                len,
-            );
-        }
-    }
 }
 
-/// Get necessary static information to match neighbors.
-fn get_offset_sr_pos_eqv_info_poses<'a, 'b>(
-    nlabel: VLabel,
-    offsets: &[usize],
-    infos: &[CharacteristicInfo<'a, 'b>],
-    id_sr_pos_eqv_poses: &HashMap<usize, (usize, Vec<usize>)>,
-) -> Vec<(usize, (usize, Vec<(usize, &'a NeighborInfo<'b>, usize)>))> {
-    offsets
-        .iter()
-        .map(|&offset| {
-            let (sr_pos, eqv_poses) = id_sr_pos_eqv_poses.get(&offset).unwrap();
-            (
-                offset,
-                (
-                    *sr_pos,
-                    infos[offset]
-                        .nlabel_ninfo_eqv()
-                        .get(&nlabel)
-                        .unwrap()
-                        .iter()
-                        .map(|&(ninfo, eqv)| (eqv, ninfo, eqv_poses[eqv]))
-                        .collect(),
-                ),
-            )
-        })
-        .collect()
+/// Scan the neighbors and write them to the SuperRow file if matched.
+fn match_neighbors<'a, N>(
+    vertex: &DataVertex,
+    neighbors: N,
+    ninfo: &NeighborInfo,
+    super_row_mm: &mut MemoryManager,
+    sr_pos: usize,
+    eqv: usize,
+    pos: usize,
+) where
+    N: IntoIterator<Item = DataNeighbor<'a>>,
+{
+    let mut new_pos = pos;
+    neighbors
+        .into_iter()
+        .filter(|neighbor| check_neighbor_constraints(vertex, neighbor, ninfo))
+        .filter(|neighbor| check_neighbor_degrees(neighbor, ninfo))
+        .filter(|neighbor| check_neighbor_edges(neighbor, ninfo))
+        .for_each(|neighbor| {
+            write_vid(super_row_mm, new_pos, neighbor.id());
+            new_pos += size_of::<VId>();
+        });
+    write_pos_len(
+        super_row_mm,
+        sr_pos,
+        eqv,
+        pos,
+        (new_pos - pos) / size_of::<VId>(),
+    );
 }
 
 /// Checks the *vertex constraint* and the *edge constraint* of `neighbor`.
@@ -277,49 +224,6 @@ fn check_neighbor_edges(neighbor: &DataNeighbor, info: &NeighborInfo) -> bool {
         }
     }
     n_to_v_elabels.len() == 0 && v_to_n_elabels.len() == 0 && undirected_elabels.len() == 0
-}
-
-/// Gets characteristic candidates and allocates space.
-///
-/// Returns the candidate offset in `infos` together with original `sr_pos`
-/// and the allocated starting position for each equivalence class in the `SuperRow`.
-/// The index is also updated by this function.
-fn get_characteristic_candidates(
-    vertex: &DataVertex,
-    infos: &[CharacteristicInfo],
-    super_row_mms: &mut [MemoryManager],
-    index_mms: &mut [MemoryManager],
-    sr_pos_idx_poses: &mut [(usize, usize)],
-) -> HashMap<usize, (usize, Vec<usize>)> {
-    infos
-        .iter()
-        .enumerate()
-        .filter_map(|(offset, info)| {
-            info.characteristic()
-                .root_constraint()
-                .map_or(Some((offset, info)), |vc| {
-                    if vc.f()(vertex.id()) {
-                        Some((offset, info))
-                    } else {
-                        None
-                    }
-                })
-        })
-        .filter_map(|(offset, info)| {
-            allocate(
-                &mut super_row_mms[info.id()],
-                sr_pos_idx_poses[info.id()].0,
-                vertex,
-                info,
-            )
-            .map(|(new_sr_pos, eqv_poses)| {
-                let (sr_pos, idx_pos) = sr_pos_idx_poses[info.id()];
-                write_index(&mut index_mms[info.id()], idx_pos, vertex.id(), sr_pos);
-                sr_pos_idx_poses[info.id()] = (new_sr_pos, idx_pos + size_of::<VIdPos>());
-                (offset, (sr_pos, eqv_poses))
-            })
-        })
-        .collect()
 }
 
 /// Tries to allocate space for a SuperRow.

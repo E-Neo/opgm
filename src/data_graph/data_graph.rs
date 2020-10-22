@@ -238,6 +238,7 @@ impl<'a> Iterator for DataVLabelNeighborIter<'a> {
 }
 
 /// An iterator visiting the neighbors of a data vertex.
+#[derive(Clone)]
 pub struct DataNeighborIter<'a> {
     mm: &'a MemoryManager,
     pos: usize,
