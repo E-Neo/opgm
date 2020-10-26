@@ -794,9 +794,9 @@ impl<'a, 'b> Plan<'a, 'b> {
         &self,
         writer: &mut dyn Write,
         super_row_mms: &[MemoryManager],
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<usize> {
         let vertex_eqv = if self.stars().is_empty() {
-            return Ok(());
+            return Ok(0);
         } else if self.join_plan().is_empty() {
             self.stars().last().unwrap().vertex_eqv()
         } else {
@@ -809,8 +809,7 @@ impl<'a, 'b> Plan<'a, 'b> {
             .collect();
         vertex_eqv.sort();
         let rows = decompress(super_row_mm, &vertex_eqv);
-        write_results(writer, rows, &vertex_eqv, self.global_constraint())?;
-        Ok(())
+        write_results(writer, rows, &vertex_eqv, self.global_constraint())
     }
 
     pub fn execute(
@@ -818,7 +817,7 @@ impl<'a, 'b> Plan<'a, 'b> {
         writer: &mut dyn Write,
         super_row_mms: &mut [MemoryManager],
         index_mms: &mut [MemoryManager],
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<usize> {
         self.execute_stars_matching(super_row_mms, index_mms);
         self.execute_join(super_row_mms, index_mms);
         self.execute_write_results(writer, super_row_mms)

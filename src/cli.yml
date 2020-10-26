@@ -27,6 +27,11 @@ subcommands:
             required: true
         - QUERY:
             required: true
+        - o:
+            help: Output file
+            short: o
+            value_name: OUTFILE
+            takes_value: true
         - db-in-memory:
             help: Load the data graph database into memory before matching
             long: db-in-memory

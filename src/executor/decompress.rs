@@ -17,7 +17,7 @@ pub fn write_results<I>(
     rows: I,
     vertex_eqv: &[(VId, usize)],
     global_constraint: &Option<GlobalConstraint>,
-) -> std::io::Result<()>
+) -> std::io::Result<usize>
 where
     I: IntoIterator<Item = Vec<VId>>,
 {
@@ -29,16 +29,19 @@ where
         }
     }
     writeln!(writer, "")?;
+    let mut num_rows = 0;
     if let Some(gc) = global_constraint {
         for row in rows.into_iter().filter(|row| gc.f()(&row)) {
             write_row(writer, &row)?;
+            num_rows += 1;
         }
     } else {
         for row in rows.into_iter() {
             write_row(writer, &row)?;
+            num_rows += 1;
         }
     }
-    Ok(())
+    Ok(num_rows)
 }
 
 fn write_row(writer: &mut dyn Write, row: &[VId]) -> std::io::Result<()> {

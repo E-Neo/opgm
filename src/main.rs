@@ -8,7 +8,7 @@ use opgm::{
 };
 use std::error::Error;
 use std::fs::File;
-use std::io::Read;
+use std::io::{BufWriter, Read, Write};
 use std::path::PathBuf;
 
 #[derive(Debug, Display, PartialEq)]
@@ -34,6 +34,7 @@ fn handle_displaydb(matches: &ArgMatches) -> std::io::Result<()> {
 }
 
 fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+    let start_time = std::time::Instant::now();
     let mut file = File::open(matches.value_of("DATAGRAPH").unwrap())?;
     let data_graph = DataGraph::new(if matches.is_present("db-in-memory") {
         let mut buffer = Vec::new();
@@ -62,7 +63,31 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         ))
         .plan();
     let (mut super_row_mms, mut index_mms) = plan.allocate();
-    plan.execute(&mut std::io::stdout(), &mut super_row_mms, &mut index_mms)?;
+    let mut time_now = std::time::Instant::now();
+    plan.execute_stars_matching(&mut super_row_mms, &mut index_mms);
+    let stars_time = (std::time::Instant::now() - time_now).as_millis();
+    time_now = std::time::Instant::now();
+    plan.execute_join(&mut super_row_mms, &mut index_mms);
+    let join_time = (std::time::Instant::now() - time_now).as_millis();
+    time_now = std::time::Instant::now();
+    let mut outfile: BufWriter<Box<dyn Write>> =
+        BufWriter::new(if let Some(outfile_path) = matches.value_of("o") {
+            Box::new(File::create(outfile_path)?)
+        } else {
+            Box::new(std::io::stdout())
+        });
+    let num_rows = plan.execute_write_results(&mut outfile, &super_row_mms)?;
+    let decompress_time = (std::time::Instant::now() - time_now).as_millis();
+    let total_time = (std::time::Instant::now() - start_time).as_millis();
+    writeln!(
+        std::io::stderr(),
+        "{},{},{},{},{}",
+        num_rows,
+        stars_time,
+        join_time,
+        decompress_time,
+        total_time
+    )?;
     Ok(())
 }
 
