@@ -19,9 +19,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 
-pub enum MemoryManagerType {
+pub enum MemoryManagerType<'a> {
     Mem,
-    Mmap(PathBuf),
+    Mmap(PathBuf, &'a str), // (directory, name)
     Sink,
 }
 
@@ -48,21 +48,21 @@ impl<'a, 'b> Task<'a, 'b> {
         }
     }
 
-    pub fn prepare(&'a mut self) -> Planner<'a, 'b> {
+    pub fn prepare<'c>(&'a mut self) -> Planner<'a, 'b, 'c> {
         Planner::new(self.data_graph, &self.pattern_graph, &mut self.gcs)
     }
 }
 
-pub struct Planner<'a, 'b> {
+pub struct Planner<'a, 'b, 'c> {
     data_graph: &'a DataGraph,
     pattern_graph: &'a PatternGraph<'b>,
     global_constraints: &'a mut Vec<Expr>,
-    star_sr_mm_type: MemoryManagerType,
-    join_sr_mm_type: MemoryManagerType,
-    index_mm_type: MemoryManagerType,
+    star_sr_mm_type: MemoryManagerType<'c>,
+    join_sr_mm_type: MemoryManagerType<'c>,
+    index_mm_type: MemoryManagerType<'c>,
 }
 
-impl<'a, 'b> Planner<'a, 'b> {
+impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
     pub fn new(
         data_graph: &'a DataGraph,
         pattern_graph: &'a PatternGraph<'b>,
@@ -78,22 +78,22 @@ impl<'a, 'b> Planner<'a, 'b> {
         }
     }
 
-    pub fn star_sr_mm_type(mut self, mm_type: MemoryManagerType) -> Self {
+    pub fn star_sr_mm_type(mut self, mm_type: MemoryManagerType<'c>) -> Self {
         self.star_sr_mm_type = mm_type;
         self
     }
 
-    pub fn join_sr_mm_type(mut self, mm_type: MemoryManagerType) -> Self {
+    pub fn join_sr_mm_type(mut self, mm_type: MemoryManagerType<'c>) -> Self {
         self.join_sr_mm_type = mm_type;
         self
     }
 
-    pub fn index_mm_type(mut self, mm_type: MemoryManagerType) -> Self {
+    pub fn index_mm_type(mut self, mm_type: MemoryManagerType<'c>) -> Self {
         self.index_mm_type = mm_type;
         self
     }
 
-    pub fn plan(self) -> Plan<'a, 'b> {
+    pub fn plan(self) -> Plan<'a, 'b, 'c> {
         let roots = decompose_stars(self.data_graph, self.pattern_graph);
         let characteristic_ids = self.create_characteristic_ids(&roots);
         let stars = self.create_stars(&roots, &characteristic_ids);
@@ -131,7 +131,7 @@ impl<'a, 'b> Planner<'a, 'b> {
 }
 
 // private methods.
-impl<'a, 'b> Planner<'a, 'b> {
+impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
     fn create_characteristic_ids(&self, roots: &[VId]) -> HashMap<Characteristic<'a, 'b>, usize> {
         let mut id = 0;
         let mut characteristic_ids = HashMap::with_capacity(roots.len());
@@ -706,14 +706,14 @@ impl JoinInfo {
 }
 
 /// The plan to match the `pattern_graph` in `data_graph`.
-pub struct Plan<'a, 'b> {
+pub struct Plan<'a, 'b, 'c> {
     data_graph: &'a DataGraph,
     pattern_graph: &'a PatternGraph<'b>,
-    star_sr_mm_type: MemoryManagerType,
-    join_sr_mm_type: MemoryManagerType,
+    star_sr_mm_type: MemoryManagerType<'c>,
+    join_sr_mm_type: MemoryManagerType<'c>,
     star_sr_mms_len: usize,
     join_sr_mms_len: usize,
-    index_mm_type: MemoryManagerType,
+    index_mm_type: MemoryManagerType<'c>,
     index_mm_len: usize,
     stars: Vec<StarInfo<'a, 'b>>,
     stars_plan: Vec<(VLabel, Vec<CharacteristicInfo<'a, 'b>>)>,
@@ -721,7 +721,7 @@ pub struct Plan<'a, 'b> {
     global_constraint: Option<GlobalConstraint>,
 }
 
-impl<'a, 'b> Plan<'a, 'b> {
+impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     pub fn data_graph(&self) -> &'a DataGraph {
         self.data_graph
     }
@@ -825,7 +825,7 @@ impl<'a, 'b> Plan<'a, 'b> {
 }
 
 // private methods.
-impl<'a, 'b> Plan<'a, 'b> {
+impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     fn create_super_row_mms(&self, count: usize) -> Vec<MemoryManager> {
         (0..count)
             .map(|id| {
@@ -835,8 +835,8 @@ impl<'a, 'b> Plan<'a, 'b> {
                     &self.join_sr_mm_type
                 } {
                     MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
-                    MemoryManagerType::Mmap(path) => {
-                        MemoryManager::Mmap(MmapFile::new(path.join(format!("{}.sr", id))))
+                    MemoryManagerType::Mmap(path, name) => {
+                        MemoryManager::Mmap(MmapFile::new(path.join(format!("{}{}.sr", name, id))))
                     }
                     MemoryManagerType::Sink => MemoryManager::Sink,
                 }
@@ -848,8 +848,8 @@ impl<'a, 'b> Plan<'a, 'b> {
         (0..count)
             .map(|id| match &self.index_mm_type {
                 MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
-                MemoryManagerType::Mmap(path) => {
-                    MemoryManager::Mmap(MmapFile::new(path.join(format!("{}.idx", id))))
+                MemoryManagerType::Mmap(path, name) => {
+                    MemoryManager::Mmap(MmapFile::new(path.join(format!("{}{}.idx", name, id))))
                 }
                 MemoryManagerType::Sink => MemoryManager::Sink,
             })
@@ -1069,7 +1069,7 @@ impl<'a, 'b> Plan<'a, 'b> {
     }
 }
 
-impl<'a, 'b> std::fmt::Display for Plan<'a, 'b> {
+impl<'a, 'b, 'c> std::fmt::Display for Plan<'a, 'b, 'c> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.fmt_stars(f)?;
         self.fmt_stars_plan(f)?;

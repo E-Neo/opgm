@@ -52,14 +52,17 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         .star_sr_mm_type(parse_mm_type(
             matches.value_of("star-mm-type").unwrap(),
             matches.value_of("directory"),
+            matches.value_of("name"),
         ))
         .join_sr_mm_type(parse_mm_type(
             matches.value_of("join-mm-type").unwrap(),
             matches.value_of("directory"),
+            matches.value_of("name"),
         ))
         .index_mm_type(parse_mm_type(
             matches.value_of("index-mm-type").unwrap(),
             matches.value_of("directory"),
+            matches.value_of("name"),
         ))
         .plan();
     let (mut super_row_mms, mut index_mms) = plan.allocate();
@@ -70,12 +73,7 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     plan.execute_join(&mut super_row_mms, &mut index_mms);
     let join_time = (std::time::Instant::now() - time_now).as_millis();
     time_now = std::time::Instant::now();
-    let mut outfile: BufWriter<Box<dyn Write>> =
-        BufWriter::new(if let Some(outfile_path) = matches.value_of("o") {
-            Box::new(File::create(outfile_path)?)
-        } else {
-            Box::new(std::io::stdout())
-        });
+    let mut outfile = BufWriter::new(File::create(matches.value_of("OUTFILE").unwrap())?);
     let num_rows = plan.execute_write_results(&mut outfile, &super_row_mms)?;
     let decompress_time = (std::time::Instant::now() - time_now).as_millis();
     let total_time = (std::time::Instant::now() - start_time).as_millis();
@@ -107,10 +105,14 @@ fn handle_plan(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn parse_mm_type(mm_type: &str, directory: Option<&str>) -> MemoryManagerType {
+fn parse_mm_type<'a>(
+    mm_type: &str,
+    directory: Option<&str>,
+    name: Option<&'a str>,
+) -> MemoryManagerType<'a> {
     match mm_type {
         "mem" => MemoryManagerType::Mem,
-        "mmap" => MemoryManagerType::Mmap(PathBuf::from(directory.unwrap())),
+        "mmap" => MemoryManagerType::Mmap(PathBuf::from(directory.unwrap()), name.unwrap()),
         "sink" => MemoryManagerType::Sink,
         _ => panic!("Invalid mm-type"),
     }

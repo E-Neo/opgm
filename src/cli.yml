@@ -27,11 +27,8 @@ subcommands:
             required: true
         - QUERY:
             required: true
-        - o:
-            help: Output file
-            short: o
-            value_name: OUTFILE
-            takes_value: true
+        - OUTFILE:
+            required: true
         - db-in-memory:
             help: Load the data graph database into memory before matching
             long: db-in-memory
@@ -41,6 +38,15 @@ subcommands:
             long: directory
             takes_value: true
             default_value: /tmp
+            required_ifs:
+              - [star-mm-type, mmap]
+              - [join-mm-type, mmap]
+              - [index-mm-type, mmap]
+        - name:
+            help: Name prefix of the memory mapped files
+            long: name
+            takes_value: true
+            default_value: opgm
             required_ifs:
               - [star-mm-type, mmap]
               - [join-mm-type, mmap]

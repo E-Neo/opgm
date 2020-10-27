@@ -137,7 +137,7 @@ fn join_two_super_rows(
         num_cover - 1,
     );
     write_right_root(super_row_mm, &mut pos, &mut pos_lens, root);
-    write_sequential_intersections(
+    if !write_sequential_intersections(
         super_row_mm,
         &mut pos,
         &mut pos_lens,
@@ -145,7 +145,10 @@ fn join_two_super_rows(
         left_sr,
         right_sr,
         sequential_intersections,
-    );
+    ) {
+        super_row_mm.resize(sr_pos);
+        return;
+    };
     write_keeps(
         super_row_mm,
         &mut pos,
@@ -222,6 +225,9 @@ fn write_right_root(
     *pos += size_of::<VId>();
 }
 
+/// Try to write sequential intersections.
+///
+/// Returns true if all image sets contain values.
 fn write_sequential_intersections(
     super_row_mm: &mut MemoryManager,
     pos: &mut usize,
@@ -230,11 +236,11 @@ fn write_sequential_intersections(
     left_sr: &SuperRow,
     right_sr: &SuperRow,
     sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
-) {
-    sequential_intersections.iter().for_each(|(l, r, vcc)| {
+) -> bool {
+    for (l, r, vcc) in sequential_intersections {
         let (left_image, right_image) = (left_sr.images()[*l], right_sr.images()[*r]);
         if let Some(vcc) = vcc {
-            write_one_sequential_intersection_with_vcc(
+            if write_one_sequential_intersection_with_vcc(
                 super_row_mm,
                 pos,
                 pos_lens,
@@ -242,11 +248,24 @@ fn write_sequential_intersections(
                 right_image,
                 vertex_cover,
                 vcc,
-            );
+            ) == 0
+            {
+                return false;
+            }
         } else {
-            write_one_sequential_intersection(super_row_mm, pos, pos_lens, left_image, right_image);
+            if write_one_sequential_intersection(
+                super_row_mm,
+                pos,
+                pos_lens,
+                left_image,
+                right_image,
+            ) == 0
+            {
+                return false;
+            }
         }
-    });
+    }
+    true
 }
 
 fn write_one_sequential_intersection(
@@ -255,7 +274,7 @@ fn write_one_sequential_intersection(
     pos_lens: &mut Vec<PosLen>,
     left_image: &[VId],
     right_image: &[VId],
-) {
+) -> usize {
     let mut new_pos = *pos;
     let (mut left_iter, mut right_iter) = (left_image.iter(), right_image.iter());
     let (mut left, mut right) = (left_iter.next(), right_iter.next());
@@ -271,11 +290,10 @@ fn write_one_sequential_intersection(
             Ordering::Greater => right = right_iter.next(),
         }
     }
-    pos_lens.push(PosLen {
-        pos: *pos,
-        len: (new_pos - *pos) / size_of::<VId>(),
-    });
+    let len = (new_pos - *pos) / size_of::<VId>();
+    pos_lens.push(PosLen { pos: *pos, len });
     *pos = new_pos;
+    len
 }
 
 fn write_one_sequential_intersection_with_vcc(
@@ -286,7 +304,7 @@ fn write_one_sequential_intersection_with_vcc(
     right_image: &[VId],
     vertex_cover: &[VId],
     vcc: &VertexCoverConstraint,
-) {
+) -> usize {
     let mut new_pos = *pos;
     let (mut left_iter, mut right_iter) = (left_image.iter(), right_image.iter());
     let (mut left, mut right) = (left_iter.next(), right_iter.next());
@@ -304,11 +322,10 @@ fn write_one_sequential_intersection_with_vcc(
             Ordering::Greater => right = right_iter.next(),
         }
     }
-    pos_lens.push(PosLen {
-        pos: *pos,
-        len: (new_pos - *pos) / size_of::<VId>(),
-    });
+    let len = (new_pos - *pos) / size_of::<VId>();
+    pos_lens.push(PosLen { pos: *pos, len });
     *pos = new_pos;
+    len
 }
 
 fn write_keeps(
