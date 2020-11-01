@@ -107,8 +107,6 @@ fn match_data_vertex_for_one_info(
     }
     let &mut (sr_pos, idx_pos) = sr_pos_idx_pos;
     if let Some((new_sr_pos, eqv_poses)) = allocate(super_row_mm, sr_pos, vertex, info) {
-        write_index(index_mm, idx_pos, vertex.id(), sr_pos);
-        *sr_pos_idx_pos = (new_sr_pos, idx_pos + size_of::<VIdPos>());
         let (mut left_iter, mut right_iter) = (
             vertex.vlabels(),
             info.characteristic()
@@ -123,7 +121,7 @@ fn match_data_vertex_for_one_info(
                     left = left_iter.next();
                 }
                 Ordering::Equal => {
-                    match_neighbors(
+                    if match_neighbors(
                         vertex,
                         neighbors.clone(),
                         ninfo,
@@ -131,7 +129,10 @@ fn match_data_vertex_for_one_info(
                         sr_pos,
                         *eqv,
                         pos,
-                    );
+                    ) == 0
+                    {
+                        return;
+                    }
                     right = right_iter.next();
                 }
                 Ordering::Greater => {
@@ -139,10 +140,14 @@ fn match_data_vertex_for_one_info(
                 }
             }
         }
+        write_index(index_mm, idx_pos, vertex.id(), sr_pos);
+        *sr_pos_idx_pos = (new_sr_pos, idx_pos + size_of::<VIdPos>());
     }
 }
 
 /// Scan the neighbors and write them to the SuperRow file if matched.
+///
+/// Returns the number of vertices written to file.
 fn match_neighbors<'a, N>(
     vertex: &DataVertex,
     neighbors: N,
@@ -151,7 +156,8 @@ fn match_neighbors<'a, N>(
     sr_pos: usize,
     eqv: usize,
     pos: usize,
-) where
+) -> usize
+where
     N: IntoIterator<Item = DataNeighbor<'a>>,
 {
     let mut new_pos = pos;
@@ -164,13 +170,9 @@ fn match_neighbors<'a, N>(
             write_vid(super_row_mm, new_pos, neighbor.id());
             new_pos += size_of::<VId>();
         });
-    write_pos_len(
-        super_row_mm,
-        sr_pos,
-        eqv,
-        pos,
-        (new_pos - pos) / size_of::<VId>(),
-    );
+    let len = (new_pos - pos) / size_of::<VId>();
+    write_pos_len(super_row_mm, sr_pos, eqv, pos, len);
+    len
 }
 
 /// Checks the *vertex constraint* and the *edge constraint* of `neighbor`.
