@@ -20,6 +20,11 @@ subcommands:
       args:
         - DATAGRAPH:
             required: true
+  - displaysr:
+      about: Displays SuperRow file
+      args:
+        - SRFILE:
+            required: true
   - match:
       about: Match the query in the data graph
       args:
@@ -84,4 +89,9 @@ subcommands:
         - DATAGRAPH:
             required: true
         - QUERY:
+            required: true
+  - srinfo:
+      about: Displays information about the SuperRow file
+      args:
+        - SRFILE:
             required: true

@@ -3,6 +3,7 @@ use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
     data_graph::{mm_read_sqlite3, DataGraph},
+    executor::{SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
     planner::{MemoryManagerType, Task},
 };
@@ -30,6 +31,17 @@ fn handle_displaydb(matches: &ArgMatches) -> std::io::Result<()> {
             &File::open(matches.value_of("DATAGRAPH").unwrap())?
         )))
     );
+    Ok(())
+}
+
+fn handle_displaysr(matches: &ArgMatches) -> std::io::Result<()> {
+    for (i, sr) in SuperRows::new(&MemoryManager::MmapReadOnly(MmapReadOnlyFile::from_file(
+        &File::open(matches.value_of("SRFILE").unwrap())?,
+    )))
+    .enumerate()
+    {
+        println!("{}: {}", i, sr);
+    }
     Ok(())
 }
 
@@ -105,6 +117,14 @@ fn handle_plan(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn handle_srinfo(matches: &ArgMatches) -> std::io::Result<()> {
+    let srfile = MemoryManager::MmapReadOnly(MmapReadOnlyFile::from_file(&File::open(
+        matches.value_of("SRFILE").unwrap(),
+    )?));
+    print!("{}", SuperRowsInfo::new(&srfile));
+    Ok(())
+}
+
 fn parse_mm_type<'a>(
     mm_type: &str,
     directory: Option<&str>,
@@ -127,10 +147,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         handle_createdb(matches)?;
     } else if let Some(matches) = matches.subcommand_matches("displaydb") {
         handle_displaydb(matches)?;
+    } else if let Some(matches) = matches.subcommand_matches("displaysr") {
+        handle_displaysr(matches)?;
     } else if let Some(matches) = matches.subcommand_matches("match") {
         handle_match(matches)?;
     } else if let Some(matches) = matches.subcommand_matches("plan") {
         handle_plan(matches)?;
+    } else if let Some(matches) = matches.subcommand_matches("srinfo") {
+        handle_srinfo(matches)?;
     }
     Ok(())
 }

@@ -65,7 +65,7 @@ fn do_join(
             if let Some(right_sr_pos) = index_get_pos(index, root) {
                 let vc = get_vertex_cover(num_cover, &left_sr, root);
                 let right_sr = SuperRow::new(right_super_row_mm, right_sr_pos, right_num_eqvs);
-                join_two_super_rows(
+                if join_two_super_rows(
                     super_row_mm,
                     num_eqvs,
                     num_cover,
@@ -76,8 +76,9 @@ fn do_join(
                     sequential_intersections,
                     left_keeps,
                     right_keeps,
-                );
-                num_rows += 1;
+                ) {
+                    num_rows += 1;
+                }
             }
         }
     }
@@ -113,7 +114,7 @@ fn join_two_super_rows(
     sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
     left_keeps: &[(usize, Option<VertexCoverConstraint>)],
     right_keeps: &[(usize, Option<VertexCoverConstraint>)],
-) {
+) -> bool {
     let sr_pos = super_row_mm.len();
     super_row_mm.resize(
         sr_pos
@@ -147,7 +148,7 @@ fn join_two_super_rows(
         sequential_intersections,
     ) {
         super_row_mm.resize(sr_pos);
-        return;
+        return false;
     };
     write_keeps(
         super_row_mm,
@@ -168,6 +169,7 @@ fn join_two_super_rows(
     super_row_mm.resize(pos);
     write_num_bytes(super_row_mm, sr_pos, pos - sr_pos);
     write_pos_lens(super_row_mm, sr_pos, pos_lens.as_slice());
+    true
 }
 
 /// Estimates the upper bound of the size of the new `SuperRow`.
