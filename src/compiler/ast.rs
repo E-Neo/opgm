@@ -49,8 +49,10 @@ pub enum BuiltIn {
     And,
     Or,
     Not,
-    LT,
-    GE,
+    Lt,
+    Ge,
+    Eq,
+    Mod,
 }
 
 /// The atom.

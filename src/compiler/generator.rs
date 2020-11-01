@@ -138,6 +138,17 @@ fn emit_vertex_constraint_ge(left: &Expr, right: &Expr) -> VertexConstraint {
     }
 }
 
+fn emit_vertex_constraint_eq(left: &Expr, right: &Expr) -> VertexConstraint {
+    match (left, right) {
+        (Expr::Constant(Atom::VId(_)), Expr::Constant(Atom::Num(n)))
+        | (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(_))) => {
+            let n = *n;
+            VertexConstraint::new(Box::new(move |vid| vid == n))
+        }
+        _ => unreachable!(),
+    }
+}
+
 fn emit_vertex_constraint(expr: &Expr) -> VertexConstraint {
     match expr {
         Expr::Constant(_) => panic!("Vertex constraint should not be Constant"),
@@ -147,8 +158,10 @@ fn emit_vertex_constraint(expr: &Expr) -> VertexConstraint {
                     BuiltIn::And => emit_vertex_constraint_and(args),
                     BuiltIn::Or => emit_vertex_constraint_or(args),
                     BuiltIn::Not => emit_vertex_constraint_not(&args[0]),
-                    BuiltIn::LT => emit_vertex_constraint_lt(&args[0], &args[1]),
-                    BuiltIn::GE => emit_vertex_constraint_ge(&args[0], &args[1]),
+                    BuiltIn::Lt => emit_vertex_constraint_lt(&args[0], &args[1]),
+                    BuiltIn::Ge => emit_vertex_constraint_ge(&args[0], &args[1]),
+                    BuiltIn::Eq => emit_vertex_constraint_eq(&args[0], &args[1]),
+                    _ => unreachable!(),
                 }
             } else {
                 panic!("Invalid application: {:?}", &**fun)
@@ -228,6 +241,26 @@ fn emit_edge_constraint_ge(left: &Expr, right: &Expr) -> EdgeConstraint {
     }
 }
 
+fn emit_edge_constraint_eq(left: &Expr, right: &Expr) -> EdgeConstraint {
+    match (left, right) {
+        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2)))
+        | (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(1))) => {
+            EdgeConstraint::new(Box::new(|u1, u2| u1 == u2))
+        }
+        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::Num(n)))
+        | (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(1))) => {
+            let n = *n;
+            EdgeConstraint::new(Box::new(move |u1, _| u1 == n))
+        }
+        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::Num(n)))
+        | (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(2))) => {
+            let n = *n;
+            EdgeConstraint::new(Box::new(move |_, u2| u2 == n))
+        }
+        _ => unreachable!(),
+    }
+}
+
 fn emit_edge_constraint(expr: &Expr) -> EdgeConstraint {
     match expr {
         Expr::Constant(_) => panic!("Edge constraint should not be Constant"),
@@ -237,8 +270,10 @@ fn emit_edge_constraint(expr: &Expr) -> EdgeConstraint {
                     BuiltIn::And => emit_edge_constraint_and(args),
                     BuiltIn::Or => emit_edge_constraint_or(args),
                     BuiltIn::Not => emit_edge_constraint_not(&args[0]),
-                    BuiltIn::LT => emit_edge_constraint_lt(&args[0], &args[1]),
-                    BuiltIn::GE => emit_edge_constraint_ge(&args[0], &args[1]),
+                    BuiltIn::Lt => emit_edge_constraint_lt(&args[0], &args[1]),
+                    BuiltIn::Ge => emit_edge_constraint_ge(&args[0], &args[1]),
+                    BuiltIn::Eq => emit_edge_constraint_eq(&args[0], &args[1]),
+                    _ => unreachable!(),
                 }
             } else {
                 panic!("Invalid application: {:?}", &**fun)
@@ -307,20 +342,39 @@ fn emit_global_constraint_ge(left: &Expr, right: &Expr) -> GlobalConstraint {
     }
 }
 
+fn emit_global_constraint_eq(left: &Expr, right: &Expr) -> GlobalConstraint {
+    match (left, right) {
+        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::VId(r))) => {
+            let (l, r) = (*l as usize, *r as usize);
+            GlobalConstraint::new(Box::new(move |eqvs| unsafe {
+                eqvs.get_unchecked(l) == eqvs.get_unchecked(r)
+            }))
+        }
+        (Expr::Constant(Atom::VId(offset)), Expr::Constant(Atom::Num(n)))
+        | (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(offset))) => {
+            let (l, n) = (*offset as usize, *n);
+            GlobalConstraint::new(Box::new(move |eqvs| *unsafe { eqvs.get_unchecked(l) } == n))
+        }
+        _ => unreachable!(),
+    }
+}
+
 fn emit_global_constraint(expr: &Expr) -> GlobalConstraint {
     match expr {
-        Expr::Constant(_) => panic!("Global constraint should not be Constant"),
+        Expr::Constant(_) => unreachable!(),
         Expr::Application(fun, args) => {
             if let Expr::Constant(Atom::BuiltIn(builtin)) = &**fun {
                 match builtin {
                     BuiltIn::And => emit_global_constraint_and(args),
                     BuiltIn::Or => emit_global_constraint_or(args),
                     BuiltIn::Not => emit_global_constraint_not(&args[0]),
-                    BuiltIn::LT => emit_global_constraint_lt(&args[0], &args[1]),
-                    BuiltIn::GE => emit_global_constraint_ge(&args[0], &args[1]),
+                    BuiltIn::Lt => emit_global_constraint_lt(&args[0], &args[1]),
+                    BuiltIn::Ge => emit_global_constraint_ge(&args[0], &args[1]),
+                    BuiltIn::Eq => emit_global_constraint_eq(&args[0], &args[1]),
+                    _ => unreachable!(),
                 }
             } else {
-                panic!("Invalid application: {:?}", &**fun)
+                unreachable!()
             }
         }
     }
@@ -461,6 +515,44 @@ fn emit_vertex_cover_constraint_ge(left: &Expr, right: &Expr, vid: VId) -> Verte
     }
 }
 
+fn emit_vertex_cover_constraint_eq(left: &Expr, right: &Expr, vid: VId) -> VertexCoverConstraint {
+    match (left, right) {
+        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::VId(r))) => {
+            if l < vid && r < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
+                    vc.get_unchecked(l as usize) == vc.get_unchecked(r as usize)
+                }))
+            } else if l < vid && r == vid {
+                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
+                    *vc.get_unchecked(l as usize) == v
+                }))
+            } else if l == vid && r < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
+                    v == *vc.get_unchecked(r as usize)
+                }))
+            } else {
+                unreachable!()
+            }
+        }
+        (&Expr::Constant(Atom::VId(offset)), &Expr::Constant(Atom::Num(n)))
+        | (&Expr::Constant(Atom::Num(n)), &Expr::Constant(Atom::VId(offset))) => {
+            if offset < vid {
+                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
+                    *vc.get_unchecked(offset as usize) == n
+                }))
+            } else if offset == vid {
+                VertexCoverConstraint::new(Box::new(move |_, v| v == n))
+            } else {
+                unreachable!()
+            }
+        }
+        _ => panic!(
+            "Invalid vertex cover constraint (Eq {:?} {:?})",
+            left, right
+        ),
+    }
+}
+
 fn emit_vertex_cover_constraint(expr: &Expr, vid: VId) -> VertexCoverConstraint {
     match expr {
         Expr::Constant(_) => panic!("Vertex cover constraint should not be Constant"),
@@ -470,8 +562,10 @@ fn emit_vertex_cover_constraint(expr: &Expr, vid: VId) -> VertexCoverConstraint 
                     BuiltIn::And => emit_vertex_cover_constraint_and(args, vid),
                     BuiltIn::Or => emit_vertex_cover_constraint_or(args, vid),
                     BuiltIn::Not => emit_vertex_cover_constraint_not(&args[0], vid),
-                    BuiltIn::LT => emit_vertex_cover_constraint_lt(&args[0], &args[1], vid),
-                    BuiltIn::GE => emit_vertex_cover_constraint_ge(&args[0], &args[1], vid),
+                    BuiltIn::Lt => emit_vertex_cover_constraint_lt(&args[0], &args[1], vid),
+                    BuiltIn::Ge => emit_vertex_cover_constraint_ge(&args[0], &args[1], vid),
+                    BuiltIn::Eq => emit_vertex_cover_constraint_eq(&args[0], &args[1], vid),
+                    _ => unreachable!(),
                 }
             } else {
                 panic!("Invalid application: {:?}", &**fun)

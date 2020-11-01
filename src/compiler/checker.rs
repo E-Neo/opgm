@@ -58,7 +58,7 @@ fn check_graph<'a>(ast: &Ast) -> Result<HashSet<VId>, error::Err<'a>> {
     Ok(vertex_set)
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq, Hash)]
 enum TypeExpr {
     Integer,
     Boolean,
@@ -98,7 +98,7 @@ fn type_of_fun<'a>(
                 Err(error::Err::WrongNumOfArgs)
             }
         }
-        BuiltIn::LT | BuiltIn::GE => {
+        BuiltIn::Lt | BuiltIn::Ge | BuiltIn::Eq => {
             if args.len() >= 1 {
                 for arg in args {
                     if !is_type(vertices, arg, TypeExpr::Integer)? {
@@ -106,6 +106,18 @@ fn type_of_fun<'a>(
                     }
                 }
                 Ok(TypeExpr::Boolean)
+            } else {
+                Err(error::Err::WrongNumOfArgs)
+            }
+        }
+        BuiltIn::Mod => {
+            if args.len() == 2 {
+                for arg in args {
+                    if !is_type(vertices, arg, TypeExpr::Integer)? {
+                        return Err(error::Err::TypeError);
+                    }
+                }
+                Ok(TypeExpr::Integer)
             } else {
                 Err(error::Err::WrongNumOfArgs)
             }

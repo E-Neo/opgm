@@ -62,8 +62,8 @@ fn rewrite_not_lt(args: &[Expr]) -> Expr {
         Expr::Application(fun, args) => {
             if let Expr::Constant(Atom::BuiltIn(builtin)) = &*fun {
                 match builtin {
-                    BuiltIn::LT => Expr::Application(builtin_box(BuiltIn::GE), args),
-                    BuiltIn::GE => Expr::Application(builtin_box(BuiltIn::LT), args),
+                    BuiltIn::Lt => Expr::Application(builtin_box(BuiltIn::Ge), args),
+                    BuiltIn::Ge => Expr::Application(builtin_box(BuiltIn::Lt), args),
                     _ => rewrite_aux(&Expr::Application(
                         builtin_box(BuiltIn::Not),
                         vec![Expr::Application(fun, args)],
@@ -84,8 +84,8 @@ fn rewrite_not_ge(args: &[Expr]) -> Expr {
         Expr::Application(fun, args) => {
             if let Expr::Constant(Atom::BuiltIn(builtin)) = &*fun {
                 match builtin {
-                    BuiltIn::LT => Expr::Application(builtin_box(BuiltIn::GE), args),
-                    BuiltIn::GE => Expr::Application(builtin_box(BuiltIn::LT), args),
+                    BuiltIn::Lt => Expr::Application(builtin_box(BuiltIn::Ge), args),
+                    BuiltIn::Ge => Expr::Application(builtin_box(BuiltIn::Lt), args),
                     _ => rewrite_aux(&Expr::Application(
                         builtin_box(BuiltIn::Not),
                         vec![Expr::Application(fun, args)],
@@ -118,8 +118,12 @@ fn rewrite_not(args: &[Expr]) -> Expr {
                     BuiltIn::And => {
                         Expr::Application(builtin_box(BuiltIn::Not), vec![rewrite_aux(arg)])
                     }
-                    BuiltIn::LT => rewrite_not_lt(args),
-                    BuiltIn::GE => rewrite_not_ge(args),
+                    BuiltIn::Lt => rewrite_not_lt(args),
+                    BuiltIn::Ge => rewrite_not_ge(args),
+                    BuiltIn::Eq => {
+                        Expr::Application(builtin_box(BuiltIn::Not), vec![rewrite_aux(arg)])
+                    }
+                    _ => unreachable!(),
                 }
             } else {
                 panic!("Invalid application: {:?}", &**fun)
@@ -140,7 +144,7 @@ fn rewrite_lt(args: &[Expr]) -> Expr {
                 }
             }
             _ => pairs.push(Expr::Application(
-                builtin_box(BuiltIn::LT),
+                builtin_box(BuiltIn::Lt),
                 vec![left, right],
             )),
         }
@@ -165,7 +169,7 @@ fn rewrite_ge(args: &[Expr]) -> Expr {
                 }
             }
             _ => pairs.push(Expr::Application(
-                builtin_box(BuiltIn::GE),
+                builtin_box(BuiltIn::Ge),
                 vec![left, right],
             )),
         }
@@ -179,6 +183,41 @@ fn rewrite_ge(args: &[Expr]) -> Expr {
     }
 }
 
+fn rewrite_eq(args: &[Expr]) -> Expr {
+    let mut pairs = Vec::with_capacity(args.len());
+    for (left, right) in args.windows(2).map(|x| (&x[0], &x[1])) {
+        let (left, right) = (rewrite_aux(left), rewrite_aux(right));
+        match (&left, &right) {
+            (Expr::Constant(Atom::Num(x)), Expr::Constant(Atom::Num(y))) => {
+                if x != y {
+                    return Expr::Constant(Atom::Boolean(false));
+                }
+            }
+            _ => pairs.push(Expr::Application(
+                builtin_box(BuiltIn::Eq),
+                vec![left, right],
+            )),
+        }
+    }
+    if pairs.len() == 0 {
+        Expr::Constant(Atom::Boolean(true))
+    } else if pairs.len() == 1 {
+        pairs[0].clone()
+    } else {
+        rewrite_aux(&Expr::Application(builtin_box(BuiltIn::And), pairs))
+    }
+}
+
+fn rewrite_mod(args: &[Expr]) -> Expr {
+    let (left, right) = (rewrite_aux(&args[0]), rewrite_aux(&args[1]));
+    match (&left, &right) {
+        (Expr::Constant(Atom::Num(x)), Expr::Constant(Atom::Num(y))) => {
+            Expr::Constant(Atom::Num(x % y))
+        }
+        _ => Expr::Application(builtin_box(BuiltIn::Mod), vec![left, right]),
+    }
+}
+
 /// Rewrites the constraint to normal form.
 fn rewrite_aux(expr: &Expr) -> Expr {
     match expr {
@@ -189,8 +228,10 @@ fn rewrite_aux(expr: &Expr) -> Expr {
                     BuiltIn::And => rewrite_and(args),
                     BuiltIn::Or => rewrite_or(args),
                     BuiltIn::Not => rewrite_not(args),
-                    BuiltIn::LT => rewrite_lt(args),
-                    BuiltIn::GE => rewrite_ge(args),
+                    BuiltIn::Lt => rewrite_lt(args),
+                    BuiltIn::Ge => rewrite_ge(args),
+                    BuiltIn::Eq => rewrite_eq(args),
+                    BuiltIn::Mod => rewrite_mod(args),
                 }
             } else {
                 panic!("Invalid application: {:?}", &**fun);

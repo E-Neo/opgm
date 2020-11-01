@@ -120,8 +120,10 @@ fn builtin(input: &str) -> IResult<&str, BuiltIn> {
         map(tag("and"), |_| BuiltIn::And),
         map(tag("or"), |_| BuiltIn::Or),
         map(tag("not"), |_| BuiltIn::Not),
-        map(tag("<"), |_| BuiltIn::LT),
-        map(tag(">="), |_| BuiltIn::GE),
+        map(tag("<"), |_| BuiltIn::Lt),
+        map(tag(">="), |_| BuiltIn::Ge),
+        map(tag("="), |_| BuiltIn::Eq),
+        map(tag("%"), |_| BuiltIn::Mod),
     ))(input)
 }
 
@@ -306,11 +308,11 @@ mod tests {
                         Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::Or))),
                         vec![
                             Expr::Application(
-                                Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::LT))),
+                                Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::Lt))),
                                 vec![Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2))]
                             ),
                             Expr::Application(
-                                Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::LT))),
+                                Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::Lt))),
                                 vec![Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(3))]
                             )
                         ]
@@ -350,11 +352,11 @@ mod tests {
                     Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::And))),
                     vec![
                         Expr::Application(
-                            Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::LT))),
+                            Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::Lt))),
                             vec![Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2))]
                         ),
                         Expr::Application(
-                            Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::LT))),
+                            Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::Lt))),
                             vec![Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(3))]
                         )
                     ]

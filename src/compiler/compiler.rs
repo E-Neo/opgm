@@ -105,7 +105,7 @@ mod tests {
                 assert_eq!(
                     gcs,
                     vec![Expr::Application(
-                        Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::LT))),
+                        Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::Lt))),
                         vec![Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(3))]
                     )]
                 );
