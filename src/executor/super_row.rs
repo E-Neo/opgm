@@ -174,7 +174,12 @@ impl std::fmt::Display for SuperRowsInfo {
         writeln!(f, "num_eqvs: {}", self.num_eqvs)?;
         writeln!(f, "num_cover: {}", self.num_cover)?;
         writeln!(f, "used_vertices: {}", self.used_vertices)?;
-        writeln!(f, "allocated_vertices: {}", self.allocated_vertices)
+        writeln!(f, "allocated_vertices: {}", self.allocated_vertices)?;
+        write!(
+            f,
+            "utilization: {:.2}%",
+            (self.used_vertices as f64) / (self.allocated_vertices as f64) * 100f64
+        )
     }
 }
 

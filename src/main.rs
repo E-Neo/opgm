@@ -40,7 +40,14 @@ fn handle_displaysr(matches: &ArgMatches) -> std::io::Result<()> {
     )))
     .enumerate()
     {
-        println!("{}: {}", i, sr);
+        println!(
+            "{}: {:.2}% ({}/{}) {}",
+            i,
+            (sr.used_vertices() as f64) / (sr.allocated_vertices() as f64) * 100f64,
+            sr.used_vertices(),
+            sr.allocated_vertices(),
+            sr
+        );
     }
     Ok(())
 }
@@ -121,7 +128,7 @@ fn handle_srinfo(matches: &ArgMatches) -> std::io::Result<()> {
     let srfile = MemoryManager::MmapReadOnly(MmapReadOnlyFile::from_file(&File::open(
         matches.value_of("SRFILE").unwrap(),
     )?));
-    print!("{}", SuperRowsInfo::new(&srfile));
+    println!("{}", SuperRowsInfo::new(&srfile));
     Ok(())
 }
 
