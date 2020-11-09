@@ -7,6 +7,97 @@ use crate::{
 };
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
+#[derive(PartialEq)]
+enum Value {
+    Boolean(bool),
+    Integer(i64),
+}
+
+fn eval(expr: &Expr, env: &[VId]) -> Value {
+    match expr {
+        Expr::Constant(Atom::VId(u)) => Value::Integer(env[*u as usize]),
+        Expr::Constant(Atom::Num(x)) => Value::Integer(*x),
+        Expr::Constant(Atom::Boolean(x)) => Value::Boolean(*x),
+        Expr::Constant(Atom::BuiltIn(_)) => unimplemented!(),
+        Expr::Application(fun, args) => {
+            if let Expr::Constant(Atom::BuiltIn(builtin)) = fun.as_ref() {
+                match builtin {
+                    BuiltIn::And => Value::Boolean(
+                        args.iter()
+                            .all(|arg| eval(arg, env) == Value::Boolean(true)),
+                    ),
+                    BuiltIn::Or => Value::Boolean(
+                        args.iter()
+                            .any(|arg| eval(arg, env) == Value::Boolean(true)),
+                    ),
+                    BuiltIn::Not => {
+                        if let Value::Boolean(x) = eval(&args[0], env) {
+                            Value::Boolean(!x)
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    BuiltIn::Lt => {
+                        if let Value::Integer(mut x) = eval(&args[0], env) {
+                            for arg in args.iter().skip(1).map(|arg| {
+                                if let Value::Integer(x) = eval(arg, env) {
+                                    x
+                                } else {
+                                    unreachable!()
+                                }
+                            }) {
+                                if x < arg {
+                                    x = arg;
+                                } else {
+                                    return Value::Boolean(false);
+                                }
+                            }
+                            Value::Boolean(true)
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    BuiltIn::Ge => {
+                        if let Value::Integer(mut x) = eval(&args[0], env) {
+                            for arg in args.iter().skip(1).map(|arg| {
+                                if let Value::Integer(x) = eval(arg, env) {
+                                    x
+                                } else {
+                                    unreachable!()
+                                }
+                            }) {
+                                if x >= arg {
+                                    x = arg;
+                                } else {
+                                    return Value::Boolean(false);
+                                }
+                            }
+                            Value::Boolean(true)
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    BuiltIn::Eq => {
+                        let x = eval(&args[0], env);
+                        Value::Boolean(args.iter().skip(1).all(|arg| eval(arg, env) == x))
+                    }
+                    BuiltIn::Mod => {
+                        if let (Value::Integer(x), Value::Integer(y)) =
+                            (eval(&args[0], env), eval(&args[1], env))
+                        {
+                            Value::Integer(x % y)
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                }
+            } else {
+                unreachable!()
+            }
+        }
+    }
+}
+
 pub struct Edges {
     vertices: HashMap<VId, HashSet<VId>>,
 }
@@ -95,191 +186,27 @@ fn merge_exprs(mut exprs: Vec<Expr>) -> Expr {
     }
 }
 
-fn emit_vertex_constraint_and(args: &[Expr]) -> VertexConstraint {
-    let args: Vec<_> = args.iter().map(emit_vertex_constraint).collect();
-    VertexConstraint::new(Box::new(move |vid| args.iter().all(|f| f.f()(vid))))
-}
-
-fn emit_vertex_constraint_or(args: &[Expr]) -> VertexConstraint {
-    let args: Vec<_> = args.iter().map(emit_vertex_constraint).collect();
-    VertexConstraint::new(Box::new(move |vid| args.iter().any(|f| f.f()(vid))))
-}
-
-fn emit_vertex_constraint_not(arg: &Expr) -> VertexConstraint {
-    let arg = emit_vertex_constraint(arg);
-    VertexConstraint::new(Box::new(move |vid| !arg.f()(vid)))
-}
-
-fn emit_vertex_constraint_lt(left: &Expr, right: &Expr) -> VertexConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(_)), Expr::Constant(Atom::Num(n))) => {
-            let n = *n;
-            VertexConstraint::new(Box::new(move |vid| vid < n))
-        }
-        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(_))) => {
-            let n = *n;
-            VertexConstraint::new(Box::new(move |vid| n < vid))
-        }
-        _ => panic!("Invalid vertex constraint LT"),
-    }
-}
-
-fn emit_vertex_constraint_ge(left: &Expr, right: &Expr) -> VertexConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(_)), Expr::Constant(Atom::Num(n))) => {
-            let n = *n;
-            VertexConstraint::new(Box::new(move |vid| vid >= n))
-        }
-        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(_))) => {
-            let n = *n;
-            VertexConstraint::new(Box::new(move |vid| n >= vid))
-        }
-        _ => panic!("Invalid vertex constraint GE"),
-    }
-}
-
-fn emit_vertex_constraint_eq(left: &Expr, right: &Expr) -> VertexConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(_)), Expr::Constant(Atom::Num(n)))
-        | (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(_))) => {
-            let n = *n;
-            VertexConstraint::new(Box::new(move |vid| vid == n))
-        }
-        _ => unreachable!(),
-    }
-}
-
 fn emit_vertex_constraint(expr: &Expr) -> VertexConstraint {
-    match expr {
-        Expr::Constant(_) => panic!("Vertex constraint should not be Constant"),
-        Expr::Application(fun, args) => {
-            if let Expr::Constant(Atom::BuiltIn(builtin)) = &**fun {
-                match builtin {
-                    BuiltIn::And => emit_vertex_constraint_and(args),
-                    BuiltIn::Or => emit_vertex_constraint_or(args),
-                    BuiltIn::Not => emit_vertex_constraint_not(&args[0]),
-                    BuiltIn::Lt => emit_vertex_constraint_lt(&args[0], &args[1]),
-                    BuiltIn::Ge => emit_vertex_constraint_ge(&args[0], &args[1]),
-                    BuiltIn::Eq => emit_vertex_constraint_eq(&args[0], &args[1]),
-                    _ => unreachable!(),
-                }
-            } else {
-                panic!("Invalid application: {:?}", &**fun)
-            }
+    let expr = expr.clone();
+    VertexConstraint::new(Box::new(move |v| {
+        if let Value::Boolean(x) = eval(&expr, &[v]) {
+            x
+        } else {
+            unreachable!()
         }
-    }
-}
-
-fn emit_edge_constraint_and(args: &[Expr]) -> EdgeConstraint {
-    let args: Vec<_> = args.iter().map(emit_edge_constraint).collect();
-    EdgeConstraint::new(Box::new(move |u1, u2| args.iter().all(|f| f.f()(u1, u2))))
-}
-
-fn emit_edge_constraint_or(args: &[Expr]) -> EdgeConstraint {
-    let args: Vec<_> = args.iter().map(emit_edge_constraint).collect();
-    EdgeConstraint::new(Box::new(move |u1, u2| args.iter().any(|f| f.f()(u1, u2))))
-}
-
-fn emit_edge_constraint_not(arg: &Expr) -> EdgeConstraint {
-    let arg = emit_edge_constraint(arg);
-    EdgeConstraint::new(Box::new(move |u1, u2| !arg.f()(u1, u2)))
-}
-
-fn emit_edge_constraint_lt(left: &Expr, right: &Expr) -> EdgeConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2))) => {
-            EdgeConstraint::new(Box::new(|u1, u2| u1 < u2))
-        }
-        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(1))) => {
-            EdgeConstraint::new(Box::new(|u1, u2| u2 < u1))
-        }
-        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::Num(n))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |u1, _| u1 < n))
-        }
-        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(1))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |u1, _| n < u1))
-        }
-        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::Num(n))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |_, u2| u2 < n))
-        }
-        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(2))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |_, u2| n < u2))
-        }
-        _ => panic!("Invalid edge constraint LT"),
-    }
-}
-
-fn emit_edge_constraint_ge(left: &Expr, right: &Expr) -> EdgeConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2))) => {
-            EdgeConstraint::new(Box::new(|u1, u2| u1 >= u2))
-        }
-        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(1))) => {
-            EdgeConstraint::new(Box::new(|u1, u2| u2 >= u1))
-        }
-        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::Num(n))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |u1, _| u1 >= n))
-        }
-        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(1))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |u1, _| n >= u1))
-        }
-        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::Num(n))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |_, u2| u2 >= n))
-        }
-        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(2))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |_, u2| n >= u2))
-        }
-        _ => panic!("Invalid edge constraint GE"),
-    }
-}
-
-fn emit_edge_constraint_eq(left: &Expr, right: &Expr) -> EdgeConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::VId(2)))
-        | (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::VId(1))) => {
-            EdgeConstraint::new(Box::new(|u1, u2| u1 == u2))
-        }
-        (Expr::Constant(Atom::VId(1)), Expr::Constant(Atom::Num(n)))
-        | (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(1))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |u1, _| u1 == n))
-        }
-        (Expr::Constant(Atom::VId(2)), Expr::Constant(Atom::Num(n)))
-        | (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(2))) => {
-            let n = *n;
-            EdgeConstraint::new(Box::new(move |_, u2| u2 == n))
-        }
-        _ => unreachable!(),
-    }
+    }))
 }
 
 fn emit_edge_constraint(expr: &Expr) -> EdgeConstraint {
-    match expr {
-        Expr::Constant(_) => panic!("Edge constraint should not be Constant"),
-        Expr::Application(fun, args) => {
-            if let Expr::Constant(Atom::BuiltIn(builtin)) = &**fun {
-                match builtin {
-                    BuiltIn::And => emit_edge_constraint_and(args),
-                    BuiltIn::Or => emit_edge_constraint_or(args),
-                    BuiltIn::Not => emit_edge_constraint_not(&args[0]),
-                    BuiltIn::Lt => emit_edge_constraint_lt(&args[0], &args[1]),
-                    BuiltIn::Ge => emit_edge_constraint_ge(&args[0], &args[1]),
-                    BuiltIn::Eq => emit_edge_constraint_eq(&args[0], &args[1]),
-                    _ => unreachable!(),
-                }
-            } else {
-                panic!("Invalid application: {:?}", &**fun)
-            }
+    let mut expr = expr.clone();
+    rename_vid(&mut expr, &vec![(1, 0), (2, 1)].into_iter().collect());
+    EdgeConstraint::new(Box::new(move |v1, v2| {
+        if let Value::Boolean(x) = eval(&expr, &[v1, v2]) {
+            x
+        } else {
+            unreachable!()
         }
-    }
+    }))
 }
 
 fn emit_flip_edge_constraint(expr: &Expr) -> EdgeConstraint {
@@ -287,291 +214,27 @@ fn emit_flip_edge_constraint(expr: &Expr) -> EdgeConstraint {
     EdgeConstraint::new(Box::new(move |u2, u1| f.f()(u1, u2)))
 }
 
-fn emit_global_constraint_and(args: &[Expr]) -> GlobalConstraint {
-    let args: Vec<_> = args.iter().map(emit_global_constraint).collect();
-    GlobalConstraint::new(Box::new(move |eqvs| args.iter().all(|f| f.f()(eqvs))))
-}
-
-fn emit_global_constraint_or(args: &[Expr]) -> GlobalConstraint {
-    let args: Vec<_> = args.iter().map(emit_global_constraint).collect();
-    GlobalConstraint::new(Box::new(move |eqvs| args.iter().any(|f| f.f()(eqvs))))
-}
-
-fn emit_global_constraint_not(arg: &Expr) -> GlobalConstraint {
-    let arg = emit_global_constraint(arg);
-    GlobalConstraint::new(Box::new(move |eqvs| !arg.f()(eqvs)))
-}
-
-fn emit_global_constraint_lt(left: &Expr, right: &Expr) -> GlobalConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::VId(r))) => {
-            let (l, r) = (*l as usize, *r as usize);
-            GlobalConstraint::new(Box::new(move |eqvs| unsafe {
-                eqvs.get_unchecked(l) < eqvs.get_unchecked(r)
-            }))
-        }
-        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::Num(n))) => {
-            let (l, n) = (*l as usize, *n);
-            GlobalConstraint::new(Box::new(move |eqvs| *unsafe { eqvs.get_unchecked(l) } < n))
-        }
-        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(r))) => {
-            let (n, r) = (*n, *r as usize);
-            GlobalConstraint::new(Box::new(move |eqvs| n < *unsafe { eqvs.get_unchecked(r) }))
-        }
-        _ => panic!("Invalid global constraint (LT {:?} {:?})", left, right),
-    }
-}
-
-fn emit_global_constraint_ge(left: &Expr, right: &Expr) -> GlobalConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::VId(r))) => {
-            let (l, r) = (*l as usize, *r as usize);
-            GlobalConstraint::new(Box::new(move |eqvs| unsafe {
-                eqvs.get_unchecked(l) >= eqvs.get_unchecked(r)
-            }))
-        }
-        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::Num(n))) => {
-            let (l, n) = (*l as usize, *n);
-            GlobalConstraint::new(Box::new(move |eqvs| *unsafe { eqvs.get_unchecked(l) } >= n))
-        }
-        (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(r))) => {
-            let (n, r) = (*n, *r as usize);
-            GlobalConstraint::new(Box::new(move |eqvs| n >= *unsafe { eqvs.get_unchecked(r) }))
-        }
-        _ => panic!("Invalid global constraint (LT {:?} {:?})", left, right),
-    }
-}
-
-fn emit_global_constraint_eq(left: &Expr, right: &Expr) -> GlobalConstraint {
-    match (left, right) {
-        (Expr::Constant(Atom::VId(l)), Expr::Constant(Atom::VId(r))) => {
-            let (l, r) = (*l as usize, *r as usize);
-            GlobalConstraint::new(Box::new(move |eqvs| unsafe {
-                eqvs.get_unchecked(l) == eqvs.get_unchecked(r)
-            }))
-        }
-        (Expr::Constant(Atom::VId(offset)), Expr::Constant(Atom::Num(n)))
-        | (Expr::Constant(Atom::Num(n)), Expr::Constant(Atom::VId(offset))) => {
-            let (l, n) = (*offset as usize, *n);
-            GlobalConstraint::new(Box::new(move |eqvs| *unsafe { eqvs.get_unchecked(l) } == n))
-        }
-        _ => unreachable!(),
-    }
-}
-
 fn emit_global_constraint(expr: &Expr) -> GlobalConstraint {
-    match expr {
-        Expr::Constant(_) => unreachable!(),
-        Expr::Application(fun, args) => {
-            if let Expr::Constant(Atom::BuiltIn(builtin)) = &**fun {
-                match builtin {
-                    BuiltIn::And => emit_global_constraint_and(args),
-                    BuiltIn::Or => emit_global_constraint_or(args),
-                    BuiltIn::Not => emit_global_constraint_not(&args[0]),
-                    BuiltIn::Lt => emit_global_constraint_lt(&args[0], &args[1]),
-                    BuiltIn::Ge => emit_global_constraint_ge(&args[0], &args[1]),
-                    BuiltIn::Eq => emit_global_constraint_eq(&args[0], &args[1]),
-                    _ => unreachable!(),
-                }
-            } else {
-                unreachable!()
-            }
+    let expr = expr.clone();
+    GlobalConstraint::new(Box::new(move |eqvs| {
+        if let Value::Boolean(x) = eval(&expr, eqvs) {
+            x
+        } else {
+            unreachable!()
         }
-    }
+    }))
 }
 
-fn emit_vertex_cover_constraint_and(args: &[Expr], vid: VId) -> VertexCoverConstraint {
-    let args: Vec<_> = args
-        .iter()
-        .map(|expr| emit_vertex_cover_constraint(expr, vid))
-        .collect();
-    VertexCoverConstraint::new(Box::new(move |vc, v| args.iter().all(|f| f.f()(vc, v))))
-}
-
-fn emit_vertex_cover_constraint_or(args: &[Expr], vid: VId) -> VertexCoverConstraint {
-    let args: Vec<_> = args
-        .iter()
-        .map(|expr| emit_vertex_cover_constraint(expr, vid))
-        .collect();
-    VertexCoverConstraint::new(Box::new(move |vc, v| args.iter().any(|f| f.f()(vc, v))))
-}
-
-fn emit_vertex_cover_constraint_not(arg: &Expr, vid: VId) -> VertexCoverConstraint {
-    let arg = emit_vertex_cover_constraint(arg, vid);
-    VertexCoverConstraint::new(Box::new(move |vc, v| !arg.f()(vc, v)))
-}
-
-fn emit_vertex_cover_constraint_lt(left: &Expr, right: &Expr, vid: VId) -> VertexCoverConstraint {
-    match (left, right) {
-        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::VId(r))) => {
-            if l < vid && r < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
-                    vc.get_unchecked(l as usize) < vc.get_unchecked(r as usize)
-                }))
-            } else if l < vid && r == vid {
-                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
-                    *vc.get_unchecked(l as usize) < v
-                }))
-            } else if l == vid && r < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
-                    v < *vc.get_unchecked(r as usize)
-                }))
-            } else {
-                panic!(
-                    "Invalid vertex cover constraint (LT {:?} {:?})",
-                    left, right
-                )
-            }
+fn emit_vertex_cover_constraint(expr: &Expr) -> VertexCoverConstraint {
+    let expr = expr.clone();
+    VertexCoverConstraint::new(Box::new(move |vc, v| {
+        let env = [vc, &[v]].concat();
+        if let Value::Boolean(x) = eval(&expr, &env) {
+            x
+        } else {
+            unreachable!()
         }
-        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::Num(n))) => {
-            if l < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
-                    *vc.get_unchecked(l as usize) < n
-                }))
-            } else if l == vid {
-                VertexCoverConstraint::new(Box::new(move |_, v| v < n))
-            } else {
-                panic!(
-                    "Invalid vertex cover constraint (LT {:?} {:?})",
-                    left, right
-                )
-            }
-        }
-        (&Expr::Constant(Atom::Num(n)), &Expr::Constant(Atom::VId(r))) => {
-            if r < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
-                    n < *vc.get_unchecked(r as usize)
-                }))
-            } else if r == vid {
-                VertexCoverConstraint::new(Box::new(move |_, v| n < v))
-            } else {
-                panic!(
-                    "Invalid vertex cover constraint (LT {:?} {:?})",
-                    left, right
-                )
-            }
-        }
-        _ => panic!(
-            "Invalid vertex cover constraint (LT {:?} {:?})",
-            left, right
-        ),
-    }
-}
-
-fn emit_vertex_cover_constraint_ge(left: &Expr, right: &Expr, vid: VId) -> VertexCoverConstraint {
-    match (left, right) {
-        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::VId(r))) => {
-            if l < vid && r < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
-                    vc.get_unchecked(l as usize) >= vc.get_unchecked(r as usize)
-                }))
-            } else if l < vid && r == vid {
-                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
-                    *vc.get_unchecked(l as usize) >= v
-                }))
-            } else if l == vid && r < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
-                    v >= *vc.get_unchecked(r as usize)
-                }))
-            } else {
-                panic!(
-                    "Invalid vertex cover constraint (GE {:?} {:?})",
-                    left, right
-                )
-            }
-        }
-        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::Num(n))) => {
-            if l < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
-                    *vc.get_unchecked(l as usize) >= n
-                }))
-            } else if l == vid {
-                VertexCoverConstraint::new(Box::new(move |_, v| v >= n))
-            } else {
-                panic!(
-                    "Invalid vertex cover constraint (GE {:?} {:?})",
-                    left, right
-                )
-            }
-        }
-        (&Expr::Constant(Atom::Num(n)), &Expr::Constant(Atom::VId(r))) => {
-            if r < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
-                    n >= *vc.get_unchecked(r as usize)
-                }))
-            } else if r == vid {
-                VertexCoverConstraint::new(Box::new(move |_, v| n >= v))
-            } else {
-                panic!(
-                    "Invalid vertex cover constraint (GE {:?} {:?})",
-                    left, right
-                )
-            }
-        }
-        _ => panic!(
-            "Invalid vertex cover constraint (GE {:?} {:?})",
-            left, right
-        ),
-    }
-}
-
-fn emit_vertex_cover_constraint_eq(left: &Expr, right: &Expr, vid: VId) -> VertexCoverConstraint {
-    match (left, right) {
-        (&Expr::Constant(Atom::VId(l)), &Expr::Constant(Atom::VId(r))) => {
-            if l < vid && r < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
-                    vc.get_unchecked(l as usize) == vc.get_unchecked(r as usize)
-                }))
-            } else if l < vid && r == vid {
-                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
-                    *vc.get_unchecked(l as usize) == v
-                }))
-            } else if l == vid && r < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, v| unsafe {
-                    v == *vc.get_unchecked(r as usize)
-                }))
-            } else {
-                unreachable!()
-            }
-        }
-        (&Expr::Constant(Atom::VId(offset)), &Expr::Constant(Atom::Num(n)))
-        | (&Expr::Constant(Atom::Num(n)), &Expr::Constant(Atom::VId(offset))) => {
-            if offset < vid {
-                VertexCoverConstraint::new(Box::new(move |vc, _| unsafe {
-                    *vc.get_unchecked(offset as usize) == n
-                }))
-            } else if offset == vid {
-                VertexCoverConstraint::new(Box::new(move |_, v| v == n))
-            } else {
-                unreachable!()
-            }
-        }
-        _ => panic!(
-            "Invalid vertex cover constraint (Eq {:?} {:?})",
-            left, right
-        ),
-    }
-}
-
-fn emit_vertex_cover_constraint(expr: &Expr, vid: VId) -> VertexCoverConstraint {
-    match expr {
-        Expr::Constant(_) => panic!("Vertex cover constraint should not be Constant"),
-        Expr::Application(fun, args) => {
-            if let Expr::Constant(Atom::BuiltIn(builtin)) = &**fun {
-                match builtin {
-                    BuiltIn::And => emit_vertex_cover_constraint_and(args, vid),
-                    BuiltIn::Or => emit_vertex_cover_constraint_or(args, vid),
-                    BuiltIn::Not => emit_vertex_cover_constraint_not(&args[0], vid),
-                    BuiltIn::Lt => emit_vertex_cover_constraint_lt(&args[0], &args[1], vid),
-                    BuiltIn::Ge => emit_vertex_cover_constraint_ge(&args[0], &args[1], vid),
-                    BuiltIn::Eq => emit_vertex_cover_constraint_eq(&args[0], &args[1], vid),
-                    _ => unreachable!(),
-                }
-            } else {
-                panic!("Invalid application: {:?}", &**fun)
-            }
-        }
-    }
+    }))
 }
 
 /// Extracts valid `GlobalConstraint` from `global_constraints` and compiles it.
@@ -649,10 +312,7 @@ pub fn extract_vertex_cover_constraint(
             Expr::Application(Box::new(Expr::Constant(Atom::BuiltIn(BuiltIn::And))), gcs)
         };
         rename_vid(&mut expr, &rules);
-        Some(emit_vertex_cover_constraint(
-            &expr,
-            vertex_cover.len() as VId,
-        ))
+        Some(emit_vertex_cover_constraint(&expr))
     }
 }
 
