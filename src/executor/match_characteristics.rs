@@ -106,33 +106,36 @@ fn match_data_vertex_for_one_info(
         }
     }
     let &mut (sr_pos, idx_pos) = sr_pos_idx_pos;
-    if let Some((new_sr_pos, eqv_poses)) = allocate(super_row_mm, sr_pos, vertex, info) {
-        let (mut left_iter, mut right_iter) = (
-            vertex.vlabels(),
-            info.characteristic()
-                .infos()
-                .iter()
-                .zip(eqv_poses.iter().enumerate().skip(1)),
-        );
+    let root_pos = sr_pos
+        + size_of::<usize>()
+        + (1 + info.characteristic().infos().len()) * size_of::<PosLen>();
+    let mut pos = root_pos + size_of::<VId>();
+    if allocate(super_row_mm, sr_pos, vertex, info) {
+        let (mut left_iter, mut right_iter) = (vertex.vlabels(), info.nlabel_ninfo_eqv().iter());
         let (mut left, mut right) = (left_iter.next(), right_iter.next());
-        while let (Some((x, _, neighbors)), Some((&ninfo, (eqv, &pos)))) = (&left, &right) {
-            match (*x).cmp(&ninfo.vlabel()) {
+        while let (Some((x, _, neighbors)), Some((y, ninfo_eqvs))) = (&left, right) {
+            match (*x).cmp(y) {
                 Ordering::Less => {
                     left = left_iter.next();
                 }
                 Ordering::Equal => {
-                    if match_neighbors(
-                        vertex,
-                        neighbors.clone(),
-                        ninfo,
-                        super_row_mm,
-                        sr_pos,
-                        *eqv,
-                        pos,
-                    ) == 0
-                    {
-                        return;
+                    for &(ninfo, eqv) in ninfo_eqvs {
+                        let num_wrote = match_neighbors(
+                            vertex,
+                            neighbors.clone(),
+                            ninfo,
+                            super_row_mm,
+                            sr_pos,
+                            eqv,
+                            pos,
+                        );
+                        if num_wrote == 0 {
+                            return;
+                        } else {
+                            pos += num_wrote * size_of::<VId>();
+                        }
                     }
+                    left = left_iter.next();
                     right = right_iter.next();
                 }
                 Ordering::Greater => {
@@ -140,8 +143,11 @@ fn match_data_vertex_for_one_info(
                 }
             }
         }
+        write_num_bytes(super_row_mm, sr_pos, pos - sr_pos);
+        write_pos_len(super_row_mm, sr_pos, 0, root_pos, 1);
+        write_vid(super_row_mm, root_pos, vertex.id());
         write_index(index_mm, idx_pos, vertex.id(), sr_pos);
-        *sr_pos_idx_pos = (new_sr_pos, idx_pos + size_of::<VIdPos>());
+        *sr_pos_idx_pos = (pos, idx_pos + size_of::<VIdPos>());
     }
 }
 
@@ -230,37 +236,34 @@ fn check_neighbor_edges(neighbor: &DataNeighbor, info: &NeighborInfo) -> bool {
 
 /// Tries to allocate space for a SuperRow.
 ///
-/// If the `vertex` could match the `Characteristic`,
-/// it returns the new `sr_pos` and the starting position for each matching result set.
-/// Otherwise, it returns `None`.
-/// The matched root is also written by this function.
+/// It returns whether the `vertex` may match the `Characteristic`.
 fn allocate(
     super_row_mm: &mut MemoryManager,
     sr_pos: usize,
     vertex: &DataVertex,
     info: &CharacteristicInfo,
-) -> Option<(usize, Vec<usize>)> {
-    let mut new_sr_pos = sr_pos
-        + size_of::<usize>()
-        + (1 + info.characteristic().infos().len()) * size_of::<PosLen>();
-    let mut eqv_poses = Vec::with_capacity(1 + info.characteristic().infos().len());
-    eqv_poses.push(new_sr_pos);
-    new_sr_pos += size_of::<VId>();
+) -> bool {
+    let mut num_vids = 1;
     let mut left_iter = vertex.vlabels();
     let mut right_iter = info
-        .characteristic()
-        .infos()
+        .nlabel_ninfo_eqv()
         .iter()
-        .map(|&info| info.vlabel());
+        .map(|(&nlabel, ninfo_eqvs)| (nlabel, ninfo_eqvs.len()));
     let (mut left, mut right) = (left_iter.next(), right_iter.next());
-    while let (Some((x, len, _)), Some(y)) = (&left, right) {
+    while let (Some((x, xlen, _)), Some((y, ylen))) = (left, right) {
         match x.cmp(&y) {
             Ordering::Less => {
                 left = left_iter.next();
             }
             Ordering::Equal => {
-                eqv_poses.push(new_sr_pos);
-                new_sr_pos += len * size_of::<VId>();
+                if ylen == 1 {
+                    num_vids += xlen;
+                } else if xlen >= ylen {
+                    num_vids += xlen * ylen;
+                } else {
+                    return false;
+                }
+                left = left_iter.next();
                 right = right_iter.next();
             }
             Ordering::Greater => {
@@ -269,14 +272,15 @@ fn allocate(
         }
     }
     if let Some(_) = right {
-        None
+        false
     } else {
-        let root_pos = eqv_poses[0];
-        super_row_mm.resize(new_sr_pos);
-        write_num_bytes(super_row_mm, sr_pos, new_sr_pos - sr_pos);
-        write_pos_len(super_row_mm, sr_pos, 0, root_pos, 1);
-        write_vid(super_row_mm, root_pos, vertex.id());
-        Some((new_sr_pos, eqv_poses))
+        super_row_mm.resize(
+            sr_pos
+                + size_of::<usize>()
+                + (1 + info.characteristic().infos().len()) * size_of::<PosLen>()
+                + num_vids * size_of::<VId>(),
+        );
+        true
     }
 }
 
