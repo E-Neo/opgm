@@ -1,6 +1,6 @@
 name: opgm
 version: "0.0"
-author: Yanxuan Cui <e-neo@qq.com>
+author: Yanxuan Cui <cuiyx18@mails.tsinghua.edu.cn>
 about: Out-of-core property graph matching
 subcommands:
   - createdb:

@@ -12,10 +12,7 @@ fn query_usize(conn: &sqlite::Connection, query: &str) -> usize {
 }
 
 fn query_num_vlabels(conn: &sqlite::Connection) -> usize {
-    query_usize(
-        conn,
-        "SELECT COUNT(*) FROM (SELECT DISTINCT vlabel FROM vertices)",
-    )
+    query_usize(conn, "SELECT COUNT(DISTINCT vlabel) FROM vertices")
 }
 
 fn query_num_vertices(conn: &sqlite::Connection) -> usize {
@@ -87,7 +84,7 @@ fn query_edges(conn: &sqlite::Connection) -> EdgeIter {
     EdgeIter::new(conn)
 }
 
-fn mm_read_sqlite3_connection(mm: &mut MemoryManager, conn: sqlite::Connection) {
+fn mm_read_sqlite3_connection(mm: &mut MemoryManager, conn: &sqlite::Connection) {
     mm_read_iter(
         mm,
         query_num_vlabels(&conn),
@@ -108,7 +105,9 @@ fn mm_read_sqlite3_connection(mm: &mut MemoryManager, conn: sqlite::Connection) 
 /// ```
 pub fn mm_read_sqlite3<P: AsRef<Path>>(mm: &mut MemoryManager, path: P) -> sqlite::Result<()> {
     let conn = sqlite::open(path)?;
-    mm_read_sqlite3_connection(mm, conn);
+    conn.execute("BEGIN;")?;
+    mm_read_sqlite3_connection(mm, &conn);
+    conn.execute("END;")?;
     Ok(())
 }
 
@@ -145,7 +144,7 @@ mod tests {
     #[test]
     fn test_mm_read_sqlite3() {
         let mut sqlite3_mm = MemoryManager::Mem(vec![]);
-        mm_read_sqlite3_connection(&mut sqlite3_mm, create_triangle_sqlite3());
+        mm_read_sqlite3_connection(&mut sqlite3_mm, &create_triangle_sqlite3());
         let mm = create_triange_mm();
         assert_eq!(
             sqlite3_mm.read_slice::<u8>(0, sqlite3_mm.len()),
