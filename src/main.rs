@@ -87,23 +87,39 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     let (mut super_row_mms, mut index_mms) = plan.allocate();
     let mut time_now = std::time::Instant::now();
     plan.execute_stars_matching(&mut super_row_mms, &mut index_mms);
-    let stars_time = (std::time::Instant::now() - time_now).as_millis();
-    time_now = std::time::Instant::now();
-    plan.execute_join(&mut super_row_mms, &mut index_mms);
-    let join_time = (std::time::Instant::now() - time_now).as_millis();
-    time_now = std::time::Instant::now();
-    let mut outfile = BufWriter::new(File::create(matches.value_of("OUTFILE").unwrap())?);
-    let num_rows = plan.execute_write_results(&mut outfile, &super_row_mms)?;
-    let decompress_time = (std::time::Instant::now() - time_now).as_millis();
-    let total_time = (std::time::Instant::now() - start_time).as_millis();
     writeln!(
         std::io::stderr(),
-        "{},{},{},{},{}",
-        num_rows,
-        stars_time,
-        join_time,
-        decompress_time,
-        total_time
+        "StarsTime: {}",
+        (std::time::Instant::now() - time_now).as_millis()
+    )?;
+    time_now = std::time::Instant::now();
+    plan.execute_join(&mut super_row_mms, &mut index_mms);
+    writeln!(
+        std::io::stderr(),
+        "JoinTime: {}",
+        (std::time::Instant::now() - time_now).as_millis()
+    )?;
+    time_now = std::time::Instant::now();
+    if !matches.is_present("no-outfile") {
+        let num_rows = if matches.is_present("to-stdout") {
+            plan.execute_write_results(&mut BufWriter::new(std::io::stdout()), &super_row_mms)?
+        } else {
+            plan.execute_write_results(
+                &mut BufWriter::new(File::create(matches.value_of("OUTFILE").unwrap())?),
+                &super_row_mms,
+            )?
+        };
+        writeln!(
+            std::io::stderr(),
+            "DecompressTime: {}",
+            (std::time::Instant::now() - time_now).as_millis()
+        )?;
+        writeln!(std::io::stderr(), "NumRows: {}", num_rows)?;
+    }
+    writeln!(
+        std::io::stderr(),
+        "TotalTime: {}",
+        (std::time::Instant::now() - start_time).as_millis()
     )?;
     Ok(())
 }

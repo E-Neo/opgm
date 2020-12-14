@@ -26,16 +26,27 @@ subcommands:
         - SRFILE:
             required: true
   - match:
-      about: Match the query in the data graph
+      about: Matches the query in the data graph
       args:
         - DATAGRAPH:
             required: true
         - QUERY:
             required: true
         - OUTFILE:
-            required: true
+            required_unless_one:
+              - to-stdout
+              - no-outfile
+        - to-stdout:
+            help: Writes matching results to stdout
+            long: to-stdout
+            takes_value: false
+        - no-outfile:
+            help: Disables decompression process
+            long: no-outfile
+            takes_value: false
+            conflicts_with: to-stdout
         - db-in-memory:
-            help: Load the data graph database into memory before matching
+            help: Loads the data graph database into memory before matching
             long: db-in-memory
             takes_value: false
         - directory:
