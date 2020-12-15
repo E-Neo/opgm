@@ -1,9 +1,9 @@
-use clap::{load_yaml, App, AppSettings, ArgMatches};
+use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
     data_graph::{mm_read_sqlite3, DataGraph},
-    executor::{SuperRows, SuperRowsInfo},
+    executor::{decompress, SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
     planner::{MemoryManagerType, Task},
 };
@@ -89,19 +89,33 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     plan.execute_stars_matching(&mut super_row_mms, &mut index_mms);
     writeln!(
         std::io::stderr(),
-        "StarsTime: {}",
+        "stars_time: {}",
         (std::time::Instant::now() - time_now).as_millis()
     )?;
     time_now = std::time::Instant::now();
     plan.execute_join(&mut super_row_mms, &mut index_mms);
     writeln!(
         std::io::stderr(),
-        "JoinTime: {}",
+        "join_time: {}",
         (std::time::Instant::now() - time_now).as_millis()
     )?;
     time_now = std::time::Instant::now();
     if !matches.is_present("no-outfile") {
-        let num_rows = if matches.is_present("to-stdout") {
+        let num_rows = if matches.is_present("count-rows") {
+            if plan.stars().is_empty() {
+                0
+            } else {
+                let vertex_eqv: Vec<_> = (if plan.join_plan().is_empty() {
+                    plan.stars().last().unwrap().vertex_eqv()
+                } else {
+                    plan.join_plan().last().unwrap().vertex_eqv()
+                })
+                .iter()
+                .map(|(&vertex, &eqv)| (vertex, eqv))
+                .collect();
+                decompress(super_row_mms.last().unwrap(), &vertex_eqv).count()
+            }
+        } else if matches.is_present("to-stdout") {
             plan.execute_write_results(&mut BufWriter::new(std::io::stdout()), &super_row_mms)?
         } else {
             plan.execute_write_results(
@@ -111,14 +125,14 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         };
         writeln!(
             std::io::stderr(),
-            "DecompressTime: {}",
+            "decompress_time: {}",
             (std::time::Instant::now() - time_now).as_millis()
         )?;
-        writeln!(std::io::stderr(), "NumRows: {}", num_rows)?;
+        writeln!(std::io::stderr(), "num_rows: {}", num_rows)?;
     }
     writeln!(
         std::io::stderr(),
-        "TotalTime: {}",
+        "total_time: {}",
         (std::time::Instant::now() - start_time).as_millis()
     )?;
     Ok(())
@@ -162,9 +176,127 @@ fn parse_mm_type<'a>(
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let yaml = load_yaml!("cli.yml");
-    let matches = App::from_yaml(yaml)
+    let matches = App::new("opgm")
         .setting(AppSettings::SubcommandRequiredElseHelp)
+        .subcommand(
+            SubCommand::with_name("createdb")
+                .about("Creates data graph database file")
+                .after_help(
+                    r"The SQLite3 file must contain the following schema:
+
+  CREATE TABLE vertices (vid INT, vlabel INT);
+  CREATE TABLE edges (src INT, dst INT, elabel INT);
+",
+                )
+                .arg(Arg::with_name("SQLITE3").required(true))
+                .arg(Arg::with_name("DATAGRAPH").required(true)),
+        )
+        .subcommand(
+            SubCommand::with_name("displaydb")
+                .about("Displays disk format of the data graph database file")
+                .arg(Arg::with_name("DATAGRAPH").required(true)),
+        )
+        .subcommand(
+            SubCommand::with_name("displaysr")
+                .about("Displays SuperRow file")
+                .arg(Arg::with_name("FRFILE").required(true)),
+        )
+        .subcommand(
+            SubCommand::with_name("match")
+                .about("Matches the query in the data graph")
+                .arg(Arg::with_name("DATAGRAPH").required(true))
+                .arg(Arg::with_name("QUERY").required(true))
+                .arg(Arg::with_name("OUTFILE").required_unless_one(&[
+                    "count-rows",
+                    "to-stdout",
+                    "no-outfile",
+                ]))
+                .arg(
+                    Arg::with_name("count-rows")
+                        .help("Counts rows of matching results")
+                        .long("count-rows")
+                        .takes_value(false)
+                        .conflicts_with_all(&["to-stdout", "no-outfile"]),
+                )
+                .arg(
+                    Arg::with_name("to-stdout")
+                        .help("Writes matching results to stdout")
+                        .long("to-stdout")
+                        .takes_value(false)
+                        .conflicts_with_all(&["no-outfile"]),
+                )
+                .arg(
+                    Arg::with_name("no-outfile")
+                        .help("Disables decompression process")
+                        .long("no-outfile")
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("db-in-memory")
+                        .help("Loads the data graph database into memory before matching")
+                        .long("db-in-memory")
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("directory")
+                        .help("Prefix memory mapped files with this directory")
+                        .long("directory")
+                        .takes_value(true)
+                        .default_value("/tmp")
+                        .required_ifs(&[
+                            ("star-mm-type", "mmap"),
+                            ("join-mm-type", "mmap"),
+                            ("index-mm-type", "mmap"),
+                        ]),
+                )
+                .arg(
+                    Arg::with_name("name")
+                        .help("Names prefix of the memory mapped files")
+                        .long("name")
+                        .takes_value(true)
+                        .default_value("opgm")
+                        .required_ifs(&[
+                            ("star-mm-type", "mmap"),
+                            ("join-mm-type", "mmap"),
+                            ("index-mm-type", "mmap"),
+                        ]),
+                )
+                .arg(
+                    Arg::with_name("star-mm-type")
+                        .help("The MemoryManager for star matching results")
+                        .long("star-mm-type")
+                        .takes_value(true)
+                        .default_value("mmap")
+                        .possible_values(&["mem", "mmap", "sink"]),
+                )
+                .arg(
+                    Arg::with_name("join-mm-type")
+                        .help("The MemoryManager for join results")
+                        .long("join-mm-type")
+                        .takes_value(true)
+                        .default_value("mmap")
+                        .possible_values(&["mem", "mmap", "sink"]),
+                )
+                .arg(
+                    Arg::with_name("index-mm-type")
+                        .help("The MemoryManager for indices")
+                        .long("index-mm-type")
+                        .takes_value(true)
+                        .default_value("mmap")
+                        .possible_values(&["mem", "mmap", "sink"]),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("plan")
+                .about("Displays graph matching plan")
+                .arg(Arg::with_name("DATAGRAPH").required(true))
+                .arg(Arg::with_name("QUERY").required(true)),
+        )
+        .subcommand(
+            SubCommand::with_name("srinfo")
+                .about("Displays information about the SuperRow file")
+                .arg(Arg::with_name("SRFILE").required(true)),
+        )
         .get_matches();
     if let Some(matches) = matches.subcommand_matches("createdb") {
         handle_createdb(matches)?;
