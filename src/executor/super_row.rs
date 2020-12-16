@@ -35,15 +35,6 @@ impl<'a> SuperRow<'a> {
         }
     }
 
-    pub fn used_vertices(&self) -> usize {
-        self.images.iter().map(|img| img.len()).sum()
-    }
-
-    pub fn allocated_vertices(&self) -> usize {
-        (self.num_bytes() - size_of::<usize>() - size_of::<PosLen>() * self.num_eqvs())
-            / size_of::<VId>()
-    }
-
     /// Decompress the SuperRow.
     ///
     /// `vertex_eqv` should be sorted by `VId`.
@@ -144,26 +135,23 @@ pub struct SuperRowsInfo {
     num_rows: usize,
     num_eqvs: usize,
     num_cover: usize,
-    used_vertices: usize,
-    allocated_vertices: usize,
+    eqv_total_num_vertices: Vec<usize>,
 }
 
 impl SuperRowsInfo {
     pub fn new(mm: &MemoryManager) -> Self {
         let (num_rows, num_eqvs, num_cover) = read_super_row_header(mm);
-        let (used_vertices, allocated_vertices) =
-            SuperRows::new(mm).fold((0, 0), |(used, allocated), sr| {
-                (
-                    used + sr.used_vertices(),
-                    allocated + sr.allocated_vertices(),
-                )
-            });
+        let mut eqv_total_num_vertices = vec![0; num_eqvs];
+        for sr in SuperRows::new(mm) {
+            for (num, &img) in eqv_total_num_vertices.iter_mut().zip(sr.images()) {
+                *num += img.len();
+            }
+        }
         Self {
             num_rows,
             num_eqvs,
             num_cover,
-            used_vertices,
-            allocated_vertices,
+            eqv_total_num_vertices,
         }
     }
 }
@@ -173,13 +161,20 @@ impl std::fmt::Display for SuperRowsInfo {
         writeln!(f, "num_rows: {}", self.num_rows)?;
         writeln!(f, "num_eqvs: {}", self.num_eqvs)?;
         writeln!(f, "num_cover: {}", self.num_cover)?;
-        writeln!(f, "used_vertices: {}", self.used_vertices)?;
-        writeln!(f, "allocated_vertices: {}", self.allocated_vertices)?;
-        write!(
+        writeln!(
             f,
-            "utilization: {:.2}%",
-            (self.used_vertices as f64) / (self.allocated_vertices as f64) * 100f64
-        )
+            "eqv_total_num_vertices: {:?}",
+            self.eqv_total_num_vertices
+        )?;
+        writeln!(
+            f,
+            "eqv_avg_num_vertices: {:?}",
+            self.eqv_total_num_vertices
+                .iter()
+                .map(|&num| (num as f64) / (self.num_rows as f64))
+                .collect::<Vec<_>>()
+        )?;
+        Ok(())
     }
 }
 

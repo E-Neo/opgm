@@ -40,14 +40,7 @@ fn handle_displaysr(matches: &ArgMatches) -> std::io::Result<()> {
     )))
     .enumerate()
     {
-        println!(
-            "{}: {:.2}% ({}/{}) {}",
-            i,
-            (sr.used_vertices() as f64) / (sr.allocated_vertices() as f64) * 100f64,
-            sr.used_vertices(),
-            sr.allocated_vertices(),
-            sr
-        );
+        println!("{}: {}", i, sr);
     }
     Ok(())
 }
@@ -199,7 +192,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .subcommand(
             SubCommand::with_name("displaysr")
                 .about("Displays SuperRow file")
-                .arg(Arg::with_name("FRFILE").required(true)),
+                .arg(Arg::with_name("SRFILE").required(true)),
         )
         .subcommand(
             SubCommand::with_name("match")
