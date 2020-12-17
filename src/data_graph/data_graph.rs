@@ -305,6 +305,7 @@ impl DataGraphInfo {
                 }
             }
         }
+        num_edges /= 2;
         Self {
             num_vertices,
             num_edges,
