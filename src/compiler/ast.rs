@@ -59,7 +59,7 @@ pub enum BuiltIn {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum Atom {
     VId(VId),
-    Num(i64),
+    Num(VId),
     Boolean(bool),
     BuiltIn(BuiltIn),
 }

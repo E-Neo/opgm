@@ -8,15 +8,20 @@ use std::io::Write;
 pub fn decompress<'a>(
     super_row_mm: &'a MemoryManager,
     vertex_eqv: &'a [(VId, usize)],
-) -> impl Iterator<Item = Vec<VId>> + 'a {
-    SuperRows::new(super_row_mm).flat_map(move |sr| sr.decompress(vertex_eqv))
+    global_constraint: &'a Option<GlobalConstraint>,
+) -> Box<dyn Iterator<Item = Vec<VId>> + 'a> {
+    let iter = SuperRows::new(super_row_mm).flat_map(move |sr| sr.decompress(vertex_eqv));
+    if let Some(gc) = global_constraint {
+        Box::new(iter.filter(move |row| gc.f()(row)))
+    } else {
+        Box::new(iter)
+    }
 }
 
 pub fn write_results<I>(
     writer: &mut dyn Write,
     rows: I,
     vertex_eqv: &[(VId, usize)],
-    global_constraint: &Option<GlobalConstraint>,
 ) -> std::io::Result<usize>
 where
     I: IntoIterator<Item = Vec<VId>>,
@@ -30,16 +35,9 @@ where
     }
     writeln!(writer, "")?;
     let mut num_rows = 0;
-    if let Some(gc) = global_constraint {
-        for row in rows.into_iter().filter(|row| gc.f()(&row)) {
-            write_row(writer, &row)?;
-            num_rows += 1;
-        }
-    } else {
-        for row in rows.into_iter() {
-            write_row(writer, &row)?;
-            num_rows += 1;
-        }
+    for row in rows.into_iter() {
+        write_row(writer, &row)?;
+        num_rows += 1;
     }
     Ok(num_rows)
 }

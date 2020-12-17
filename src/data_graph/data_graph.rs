@@ -3,7 +3,7 @@ use crate::{
     memory_manager::MemoryManager,
     types::{ELabel, NeighborHeader, VId, VLabel, VLabelPosLen, VertexHeader},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 
 /// The data graph type under the property graph model.
@@ -183,12 +183,12 @@ impl<'a> DataNeighbor<'a> {
         unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).num_v_to_n }
     }
 
-    pub fn n_to_v_elabels(&self) -> &[ELabel] {
+    pub fn n_to_v_elabels(&self) -> &'a [ELabel] {
         self.mm
             .read_slice(self.pos + size_of::<NeighborHeader>(), self.num_n_to_v())
     }
 
-    pub fn v_to_n_elabels(&self) -> &[ELabel] {
+    pub fn v_to_n_elabels(&self) -> &'a [ELabel] {
         self.mm.read_slice(
             self.pos + size_of::<NeighborHeader>() + size_of::<ELabel>() * self.num_n_to_v(),
             self.num_v_to_n(),
@@ -273,6 +273,54 @@ impl<'a> Iterator for DataNeighborIter<'a> {
         } else {
             None
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct DataGraphInfo {
+    num_vertices: usize,
+    num_edges: usize,
+    num_vlabels: usize,
+    num_elabels: usize,
+}
+
+impl DataGraphInfo {
+    pub fn new(data_graph: &DataGraph) -> Self {
+        let (mut num_vertices, mut num_edges) = (0, 0);
+        let mut elabels = HashSet::new();
+        for &vlabel in data_graph.index.keys() {
+            let (num, vertices) = data_graph.vertices(vlabel);
+            num_vertices += num;
+            for vertex in vertices {
+                for (_, _, neighbors) in vertex.vlabels() {
+                    for neighbor in neighbors {
+                        num_edges += neighbor.num_v_to_n() + neighbor.num_n_to_v();
+                        neighbor.v_to_n_elabels().iter().for_each(|&elabel| {
+                            elabels.insert(elabel);
+                        });
+                        neighbor.n_to_v_elabels().iter().for_each(|&elabel| {
+                            elabels.insert(elabel);
+                        });
+                    }
+                }
+            }
+        }
+        Self {
+            num_vertices,
+            num_edges,
+            num_vlabels: data_graph.index.len(),
+            num_elabels: elabels.len(),
+        }
+    }
+}
+
+impl std::fmt::Display for DataGraphInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "num_vertices: {}", self.num_vertices)?;
+        writeln!(f, "num_edges: {}", self.num_edges)?;
+        writeln!(f, "num_vlabels: {}", self.num_vlabels)?;
+        writeln!(f, "num_elabels: {}", self.num_elabels)?;
+        Ok(())
     }
 }
 

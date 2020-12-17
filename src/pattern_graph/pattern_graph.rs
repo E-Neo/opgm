@@ -556,7 +556,7 @@ mod tests {
 
     #[test]
     fn test_constraint() {
-        fn lt_vid_num(n: i64) -> VertexConstraint {
+        fn lt_vid_num(n: VId) -> VertexConstraint {
             VertexConstraint::new(Box::new(move |vid| vid < n))
         }
         let vertex_constraints: HashMap<_, _> = vec![(1, lt_vid_num(10))].into_iter().collect();

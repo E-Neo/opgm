@@ -808,8 +808,8 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
             .map(|(&vertex, &eqv)| (vertex, eqv))
             .collect();
         vertex_eqv.sort();
-        let rows = decompress(super_row_mm, &vertex_eqv);
-        write_results(writer, rows, &vertex_eqv, self.global_constraint())
+        let rows = decompress(super_row_mm, &vertex_eqv, self.global_constraint());
+        write_results(writer, rows, &vertex_eqv)
     }
 
     pub fn execute(

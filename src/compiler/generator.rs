@@ -10,7 +10,7 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 #[derive(PartialEq)]
 enum Value {
     Boolean(bool),
-    Integer(i64),
+    Integer(VId),
 }
 
 fn eval(expr: &Expr, env: &[VId]) -> Value {

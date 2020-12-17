@@ -23,16 +23,16 @@ enum Item {
     Constraint(Expr),
 }
 
-fn non_neg(input: &str) -> IResult<&str, i64> {
+fn non_neg(input: &str) -> IResult<&str, VId> {
     map_res(digit1, |digit_str: &str| digit_str.parse())(input)
 }
 
-fn num(input: &str) -> IResult<&str, i64> {
+fn num(input: &str) -> IResult<&str, VId> {
     alt((
         non_neg,
         map_opt(preceded(tag("-"), digit1), |digit_str: &str| {
             digit_str
-                .parse::<i64>()
+                .parse::<VId>()
                 .ok()
                 .map(|n| n.checked_neg())
                 .flatten()

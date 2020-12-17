@@ -9,7 +9,7 @@ struct VertexValue {
     deg: i64,
     num_constraints: i64,
     neg_vlabel_freq: i64,
-    neg_vid: i64,
+    neg_vid: VId,
 }
 
 impl VertexValue {

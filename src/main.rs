@@ -2,7 +2,7 @@ use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
-    data_graph::{mm_read_sqlite3, DataGraph},
+    data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
     executor::{decompress, SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
     planner::{MemoryManagerType, Task},
@@ -22,6 +22,16 @@ impl std::error::Error for Err {}
 fn handle_createdb(matches: &ArgMatches) -> Result<(), sqlite::Error> {
     let mut mm = MemoryManager::Mmap(MmapFile::new(matches.value_of("DATAGRAPH").unwrap()));
     mm_read_sqlite3(&mut mm, matches.value_of("SQLITE3").unwrap())
+}
+
+fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
+    println!(
+        "{}",
+        DataGraphInfo::new(&DataGraph::new(MemoryManager::MmapReadOnly(
+            MmapReadOnlyFile::from_file(&File::open(matches.value_of("DATAGRAPH").unwrap())?)
+        )))
+    );
+    Ok(())
 }
 
 fn handle_displaydb(matches: &ArgMatches) -> std::io::Result<()> {
@@ -106,7 +116,12 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
                 .iter()
                 .map(|(&vertex, &eqv)| (vertex, eqv))
                 .collect();
-                decompress(super_row_mms.last().unwrap(), &vertex_eqv).count()
+                decompress(
+                    super_row_mms.last().unwrap(),
+                    &vertex_eqv,
+                    plan.global_constraint(),
+                )
+                .count()
             }
         } else if matches.is_present("to-stdout") {
             plan.execute_write_results(&mut BufWriter::new(std::io::stdout()), &super_row_mms)?
@@ -182,6 +197,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 ",
                 )
                 .arg(Arg::with_name("SQLITE3").required(true))
+                .arg(Arg::with_name("DATAGRAPH").required(true)),
+        )
+        .subcommand(
+            SubCommand::with_name("dbinfo")
+                .about("Displays information about the data graph")
                 .arg(Arg::with_name("DATAGRAPH").required(true)),
         )
         .subcommand(
@@ -293,6 +313,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .get_matches();
     if let Some(matches) = matches.subcommand_matches("createdb") {
         handle_createdb(matches)?;
+    } else if let Some(matches) = matches.subcommand_matches("dbinfo") {
+        handle_dbinfo(matches)?;
     } else if let Some(matches) = matches.subcommand_matches("displaydb") {
         handle_displaydb(matches)?;
     } else if let Some(matches) = matches.subcommand_matches("displaysr") {

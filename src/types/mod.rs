@@ -5,13 +5,13 @@ pub use constraints::{EdgeConstraint, GlobalConstraint, VertexConstraint, Vertex
 mod constraints;
 
 /// The vertex id type.
-pub type VId = i64;
+pub type VId = i32;
 
 /// The vertex label type.
-pub type VLabel = i32;
+pub type VLabel = i16;
 
 /// The edge label type.
-pub type ELabel = i32;
+pub type ELabel = i16;
 
 #[repr(C, packed)]
 pub(crate) struct VLabelPosLen {
