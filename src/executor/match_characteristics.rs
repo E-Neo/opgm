@@ -108,18 +108,19 @@ fn match_data_vertex_for_one_info(
     let &mut (sr_pos, idx_pos) = sr_pos_idx_pos;
     let root_pos = sr_pos
         + size_of::<usize>()
-        + (1 + info.characteristic().infos().len()) * size_of::<PosLen>();
+        + (1 + info.characteristic().info_nums().len()) * size_of::<PosLen>();
     let mut pos = root_pos + size_of::<VId>();
     if allocate(super_row_mm, sr_pos, vertex, info) {
-        let (mut left_iter, mut right_iter) = (vertex.vlabels(), info.nlabel_ninfo_eqv().iter());
+        let (mut left_iter, mut right_iter) =
+            (vertex.vlabels(), info.nlabel_ninfo_num_eqvs().iter());
         let (mut left, mut right) = (left_iter.next(), right_iter.next());
-        while let (Some((x, _, neighbors)), Some((y, ninfo_eqvs))) = (&left, right) {
+        while let (Some((x, _, neighbors)), Some((y, ninfo_num_eqvs))) = (&left, right) {
             match (*x).cmp(y) {
                 Ordering::Less => {
                     left = left_iter.next();
                 }
                 Ordering::Equal => {
-                    for &(ninfo, eqv) in ninfo_eqvs {
+                    for &(ninfo, num, eqv) in ninfo_num_eqvs {
                         let num_wrote = match_neighbors(
                             vertex,
                             neighbors.clone(),
@@ -129,7 +130,7 @@ fn match_data_vertex_for_one_info(
                             eqv,
                             pos,
                         );
-                        if num_wrote == 0 {
+                        if num_wrote < num {
                             return;
                         } else {
                             pos += num_wrote * size_of::<VId>();
@@ -246,7 +247,7 @@ fn allocate(
     let mut num_vids = 1;
     let mut left_iter = vertex.vlabels();
     let mut right_iter = info
-        .nlabel_ninfo_eqv()
+        .nlabel_ninfo_num_eqvs()
         .iter()
         .map(|(&nlabel, ninfo_eqvs)| (nlabel, ninfo_eqvs.len()));
     let (mut left, mut right) = (left_iter.next(), right_iter.next());
@@ -277,7 +278,7 @@ fn allocate(
         super_row_mm.resize(
             sr_pos
                 + size_of::<usize>()
-                + (1 + info.characteristic().infos().len()) * size_of::<PosLen>()
+                + (1 + info.characteristic().info_nums().len()) * size_of::<PosLen>()
                 + num_vids * size_of::<VId>(),
         );
         true
@@ -296,7 +297,7 @@ fn finish_results(
         write_super_row_header(
             &mut super_row_mms[info.id()],
             idx_pos / size_of::<VIdPos>(),
-            info.characteristic().infos().len() + 1,
+            info.characteristic().info_nums().len() + 1,
             1,
         );
         super_row_mms[info.id()].resize(sr_pos);

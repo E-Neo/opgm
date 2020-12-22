@@ -1,4 +1,7 @@
-use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use clap::{
+    crate_authors, crate_description, crate_name, crate_version, App, AppSettings, Arg, ArgMatches,
+    SubCommand,
+};
 use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
@@ -184,7 +187,10 @@ fn parse_mm_type<'a>(
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let matches = App::new("opgm")
+    let matches = App::new(crate_name!())
+        .about(crate_description!())
+        .author(crate_authors!())
+        .version(crate_version!())
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .subcommand(
             SubCommand::with_name("createdb")
