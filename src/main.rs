@@ -6,14 +6,17 @@ use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
     data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
-    executor::{decompress, SuperRows, SuperRowsInfo},
+    executor::{SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
     planner::{MemoryManagerType, Task},
 };
-use std::error::Error;
-use std::fs::File;
-use std::io::{BufWriter, Read, Write};
-use std::path::PathBuf;
+use rayon::prelude::*;
+use std::{
+    error::Error,
+    fs::File,
+    io::{BufWriter, Read, Write},
+    path::PathBuf,
+};
 
 #[derive(Debug, Display, PartialEq)]
 enum Err {
@@ -119,12 +122,13 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
                 .iter()
                 .map(|(&vertex, &eqv)| (vertex, eqv))
                 .collect();
-                decompress(
-                    super_row_mms.last().unwrap(),
-                    &vertex_eqv,
-                    plan.global_constraint(),
-                )
-                .count()
+                let iter = SuperRows::new(super_row_mms.last().unwrap()).par_bridge();
+                if let Some(_) = plan.global_constraint() {
+                    todo!()
+                } else {
+                    iter.flat_map(|sr| sr.decompress(&vertex_eqv).collect::<Vec<_>>())
+                        .count()
+                }
             }
         } else if matches.is_present("to-stdout") {
             plan.execute_write_results(&mut BufWriter::new(std::io::stdout()), &super_row_mms)?

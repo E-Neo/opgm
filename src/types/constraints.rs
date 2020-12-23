@@ -1,8 +1,10 @@
 //! Constraint types.
 
 use crate::types::VId;
-use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
+use std::{
+    cmp::Ordering,
+    hash::{Hash, Hasher},
+};
 
 /// Vertex constraint type.
 pub struct VertexConstraint {
