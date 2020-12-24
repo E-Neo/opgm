@@ -123,11 +123,11 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
                 .map(|(&vertex, &eqv)| (vertex, eqv))
                 .collect();
                 let iter = SuperRows::new(super_row_mms.last().unwrap()).par_bridge();
-                if let Some(_) = plan.global_constraint() {
-                    todo!()
+                if let Some(gc) = plan.global_constraint() {
+                    iter.map(|sr| sr.decompress(&vertex_eqv).filter(|row| gc.f()(row)).count())
+                        .sum()
                 } else {
-                    iter.flat_map(|sr| sr.decompress(&vertex_eqv).collect::<Vec<_>>())
-                        .count()
+                    iter.map(|sr| sr.decompress(&vertex_eqv).count()).sum()
                 }
             }
         } else if matches.is_present("to-stdout") {

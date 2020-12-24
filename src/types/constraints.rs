@@ -105,11 +105,11 @@ impl Hash for EdgeConstraint {
 }
 
 pub struct GlobalConstraint {
-    f: Box<dyn Fn(&[VId]) -> bool>,
+    f: Box<dyn Fn(&[VId]) -> bool + Send + Sync>,
 }
 
 impl GlobalConstraint {
-    pub fn new(f: Box<dyn Fn(&[VId]) -> bool>) -> Self {
+    pub fn new(f: Box<dyn Fn(&[VId]) -> bool + Send + Sync>) -> Self {
         Self { f }
     }
 
