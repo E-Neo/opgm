@@ -1055,7 +1055,7 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
                                 .iter()
                                 .map(|v| format!("u{}", v))
                                 .collect::<Vec<_>>(),
-                            info.left_id(),
+                            info.right_id(),
                             eqv,
                             if let Some(vcc) = vcc {
                                 format!(" {:?}", vcc)
