@@ -1,442 +1,302 @@
 use crate::{
-    executor::{
-        read_super_row_header, write_num_bytes, write_super_row_header, SuperRow, SuperRows,
-    },
+    executor::{read_super_row_header, SuperRow, SuperRows},
     memory_manager::MemoryManager,
-    types::{PosLen, SuperRowHeader, VId, VIdPos, VertexCoverConstraint},
+    types::{VId, VIdPos},
 };
-use std::cmp::Ordering;
-use std::mem::size_of;
+use itertools::{EitherOrBoth, Itertools};
+use std::{collections::HashMap, mem::size_of};
 
-/// Join two `SuperRow` files.
-///
-/// We adopt a simple index-based nested-loop join to join two `SuperRow` files,
-/// Since the data are compressed, the test equality process in the conventional join process is
-/// replaced by the set intersection operation.
-/// And we could intersect two sets sequentially for free, since the elements are always sorted
-/// in a `SuperRow` as a consequence of our well-designed `DataGraph` format.
-/// The join process is always boosted by the index because the image of a vertex cover always
-/// contains only one item, which could then be used as the key to run the binary search.
-pub fn join(
-    super_row_mm: &mut MemoryManager,
-    num_eqvs: usize,
-    num_cover: usize,
-    left_super_row_mm: &MemoryManager,
-    right_super_row_mm: &MemoryManager,
-    index_mm: &MemoryManager,
-    indexed_intersection: usize,
-    sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
-    left_keeps: &[(usize, Option<VertexCoverConstraint>)],
-    right_keeps: &[(usize, Option<VertexCoverConstraint>)],
-) {
-    do_join(
-        super_row_mm,
-        num_eqvs,
-        num_cover,
-        left_super_row_mm,
-        right_super_row_mm,
-        index_mm,
-        indexed_intersection,
-        sequential_intersections,
-        left_keeps,
-        right_keeps,
-    );
+pub enum IndexType {
+    Sorted,
+    Hash,
 }
 
-/// Do join without vertex cover's global constraint.
-fn do_join(
-    super_row_mm: &mut MemoryManager,
-    num_eqvs: usize,
-    num_cover: usize,
-    left_super_row_mm: &MemoryManager,
-    right_super_row_mm: &MemoryManager,
-    index_mm: &MemoryManager,
-    indexed_intersection: usize,
-    sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
-    left_keeps: &[(usize, Option<VertexCoverConstraint>)],
-    right_keeps: &[(usize, Option<VertexCoverConstraint>)],
-) {
-    let (_, right_num_eqvs, _) = read_super_row_header(right_super_row_mm);
-    let index = index_mm.read_slice::<VIdPos>(0, index_mm.len() / size_of::<VIdPos>());
-    super_row_mm.resize(size_of::<SuperRowHeader>());
-    let mut num_rows = 0;
-    for left_sr in SuperRows::new(left_super_row_mm) {
-        for &root in left_sr.images()[indexed_intersection] {
-            if let Some(right_sr_pos) = index_get_pos(index, root) {
-                let vc = get_vertex_cover(num_cover, &left_sr, root);
-                let right_sr = SuperRow::new(right_super_row_mm, right_sr_pos, right_num_eqvs);
-                if join_two_super_rows(
-                    super_row_mm,
-                    num_eqvs,
-                    num_cover,
-                    &vc,
-                    &left_sr,
-                    &right_sr,
-                    root,
-                    sequential_intersections,
-                    left_keeps,
-                    right_keeps,
-                ) {
-                    num_rows += 1;
-                }
-            }
+pub struct IndexedJoinPlan {
+    scan: Vec<(usize, usize)>, // (sr, eqv)
+    index_id: usize,
+    contains_checks: Vec<(usize, usize)>, // (eqv, vc_offset)
+}
+
+impl IndexedJoinPlan {
+    pub fn scan(&self) -> &[(usize, usize)] {
+        &self.scan
+    }
+
+    pub fn index_id(&self) -> usize {
+        self.index_id
+    }
+
+    pub fn contains_checks(&self) -> &[(usize, usize)] {
+        &self.contains_checks
+    }
+}
+
+impl IndexedJoinPlan {
+    fn new(
+        scan: Vec<(usize, usize)>,
+        index_id: usize,
+        contains_checks: Vec<(usize, usize)>,
+    ) -> Self {
+        Self {
+            scan,
+            index_id,
+            contains_checks,
         }
     }
-    write_super_row_header(super_row_mm, num_rows, num_eqvs, num_cover);
 }
 
-fn get_vertex_cover(num_cover: usize, left_sr: &SuperRow, root: VId) -> Vec<VId> {
-    let mut vc = Vec::with_capacity(num_cover);
-    for eqv in 0..num_cover - 1 {
-        vc.push(left_sr.images()[eqv][0]);
+pub struct IntersectionPlan {
+    intersection: Vec<(usize, usize)>, // (sr, eqv)
+}
+
+impl IntersectionPlan {
+    pub fn intersection(&self) -> &[(usize, usize)] {
+        &self.intersection
     }
-    vc.push(root);
-    vc
 }
 
-/// Search the `sr_pos` of `root`.
-fn index_get_pos(index: &[VIdPos], root: VId) -> Option<usize> {
-    index
-        .binary_search_by_key(&root, |vid_pos| vid_pos.vid)
-        .ok()
-        .map(|id| index[id].pos)
+impl IntersectionPlan {
+    fn new(intersection: Vec<(usize, usize)>) -> Self {
+        Self { intersection }
+    }
 }
 
-/// Tries to join two `SuperRow`s.
-fn join_two_super_rows(
-    super_row_mm: &mut MemoryManager,
-    num_eqvs: usize,
+pub struct JoinPlan {
     num_cover: usize,
-    vertex_cover: &[VId],
-    left_sr: &SuperRow,
-    right_sr: &SuperRow,
-    root: VId,
-    sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
-    left_keeps: &[(usize, Option<VertexCoverConstraint>)],
-    right_keeps: &[(usize, Option<VertexCoverConstraint>)],
-) -> bool {
-    let sr_pos = super_row_mm.len();
-    super_row_mm.resize(
-        sr_pos
-            + estimate_num_bytes(
-                num_eqvs,
-                num_cover,
-                left_sr,
-                right_sr,
-                sequential_intersections,
-                left_keeps,
-                right_keeps,
+    index_type: IndexType,
+    indexed_joins: Vec<IndexedJoinPlan>,
+    intersections: Vec<IntersectionPlan>,
+}
+
+impl JoinPlan {
+    pub fn num_cover(&self) -> usize {
+        self.num_cover
+    }
+
+    pub fn index_type(&self) -> &IndexType {
+        &self.index_type
+    }
+
+    pub fn indexed_joins(&self) -> &[IndexedJoinPlan] {
+        &self.indexed_joins
+    }
+
+    pub fn intersections(&self) -> &[IntersectionPlan] {
+        &self.intersections
+    }
+}
+
+impl JoinPlan {
+    fn new(
+        num_cover: usize,
+        index_type: IndexType,
+        indexed_joins: Vec<IndexedJoinPlan>,
+        intersections: Vec<IntersectionPlan>,
+    ) -> Self {
+        Self {
+            num_cover,
+            index_type,
+            indexed_joins,
+            intersections,
+        }
+    }
+}
+
+struct Intersection<'a> {
+    inner: Box<dyn Iterator<Item = &'a VId> + 'a>,
+}
+
+impl<'a> Intersection<'a> {
+    fn new<I: IntoIterator<Item = &'a [VId]>>(images: I) -> Self {
+        let mut tail = images.into_iter();
+        let mut inner: Box<dyn Iterator<Item = &'a VId> + 'a> =
+            Box::new(tail.next().unwrap().into_iter());
+        for other in tail {
+            inner = Box::new(inner.merge_join_by(other, |x, y| x.cmp(y)).filter_map(|x| {
+                if let EitherOrBoth::Both(x, _) = x {
+                    Some(x)
+                } else {
+                    None
+                }
+            }));
+        }
+        Self { inner }
+    }
+}
+
+impl<'a> Iterator for Intersection<'a> {
+    type Item = &'a VId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
+enum IndexInner<'a> {
+    Sorted(&'a [VIdPos]),
+    Hash(HashMap<VId, usize>),
+}
+
+impl<'a> IndexInner<'a> {
+    fn new(index_mm: &'a MemoryManager, index_type: &IndexType) -> Self {
+        let vid_poses: &[VIdPos] = index_mm.read_slice(0, index_mm.len() / size_of::<VIdPos>());
+        match index_type {
+            IndexType::Sorted => IndexInner::Sorted(vid_poses),
+            IndexType::Hash => IndexInner::Hash(
+                vid_poses
+                    .iter()
+                    .map(|vid_pos| (vid_pos.vid, vid_pos.pos))
+                    .collect(),
             ),
-    );
-    let mut pos = sr_pos + size_of::<usize>() + num_eqvs * size_of::<PosLen>();
-    let mut pos_lens = Vec::with_capacity(num_eqvs);
-    write_left_vertex_cover(
-        super_row_mm,
-        &mut pos,
-        &mut pos_lens,
-        left_sr,
-        num_cover - 1,
-    );
-    write_right_root(super_row_mm, &mut pos, &mut pos_lens, root);
-    if !write_sequential_intersections(
-        super_row_mm,
-        &mut pos,
-        &mut pos_lens,
-        vertex_cover,
-        left_sr,
-        right_sr,
-        sequential_intersections,
-    ) {
-        super_row_mm.resize(sr_pos);
-        return false;
-    };
-    write_keeps(
-        super_row_mm,
-        &mut pos,
-        &mut pos_lens,
-        vertex_cover,
-        left_sr,
-        left_keeps,
-    );
-    write_keeps(
-        super_row_mm,
-        &mut pos,
-        &mut pos_lens,
-        vertex_cover,
-        right_sr,
-        right_keeps,
-    );
-    super_row_mm.resize(pos);
-    write_num_bytes(super_row_mm, sr_pos, pos - sr_pos);
-    write_pos_lens(super_row_mm, sr_pos, pos_lens.as_slice());
-    true
+        }
+    }
+
+    fn get(&self, vid: VId) -> Option<usize> {
+        match self {
+            IndexInner::Sorted(vid_poses) => vid_poses
+                .binary_search_by_key(&vid, |vid_pos| vid_pos.vid)
+                .map_or(None, |offset| Some(vid_poses[offset].pos)),
+            IndexInner::Hash(vid_poses) => vid_poses.get(&vid).map(|&pos| pos),
+        }
+    }
 }
 
-/// Estimates the upper bound of the size of the new `SuperRow`.
-fn estimate_num_bytes(
+struct Index<'a> {
+    super_row_mm: &'a MemoryManager,
     num_eqvs: usize,
-    num_cover: usize,
-    left_sr: &SuperRow,
-    right_sr: &SuperRow,
-    sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
-    left_keeps: &[(usize, Option<VertexCoverConstraint>)],
-    right_keeps: &[(usize, Option<VertexCoverConstraint>)],
-) -> usize {
-    size_of::<usize>()
-        + num_eqvs * size_of::<PosLen>()
-        + (num_cover
-            + sequential_intersections
+    inner: IndexInner<'a>,
+}
+
+impl<'a> Index<'a> {
+    fn new(
+        super_row_mm: &'a MemoryManager,
+        index_mm: &'a MemoryManager,
+        index_type: &IndexType,
+    ) -> Self {
+        let (_, num_eqvs, _) = read_super_row_header(super_row_mm);
+        Self {
+            super_row_mm,
+            num_eqvs,
+            inner: IndexInner::new(index_mm, index_type),
+        }
+    }
+
+    fn get(&self, vid: VId) -> Option<SuperRow<'a>> {
+        self.inner
+            .get(vid)
+            .map(|sr_pos| SuperRow::new(self.super_row_mm, sr_pos, self.num_eqvs))
+    }
+}
+
+pub struct JoinedSuperRow<'a> {
+    vertex_cover: Vec<VId>,
+    leaves: Vec<Intersection<'a>>,
+}
+
+impl<'a> JoinedSuperRow<'a> {
+    fn new(vertex_cover: Vec<VId>, leaves: Vec<Intersection<'a>>) -> Self {
+        Self {
+            vertex_cover,
+            leaves,
+        }
+    }
+}
+
+pub struct JoinedSuperRows<'a> {
+    indices: Vec<Index<'a>>,
+    plan: &'a JoinPlan,
+    top_scan: SuperRows<'a>,
+    srs: Vec<SuperRow<'a>>,
+    vc: Vec<VId>,
+    scans: Vec<Intersection<'a>>,
+}
+
+impl<'a> JoinedSuperRows<'a> {
+    fn new(
+        super_row_mms: &'a [MemoryManager],
+        index_mms: &'a [MemoryManager],
+        plan: &'a JoinPlan,
+    ) -> Self {
+        Self {
+            indices: super_row_mms
                 .iter()
-                .map(|&(l, r, _)| {
-                    std::cmp::min(left_sr.images()[l].len(), right_sr.images()[r].len())
+                .zip(index_mms)
+                .map(|(super_row_mm, index_mm)| {
+                    Index::new(super_row_mm, index_mm, plan.index_type())
                 })
-                .sum::<usize>()
-            + left_keeps
-                .iter()
-                .map(|&(l, _)| left_sr.images()[l].len())
-                .sum::<usize>()
-            + right_keeps
-                .iter()
-                .map(|&(r, _)| right_sr.images()[r].len())
-                .sum::<usize>())
-            * size_of::<VId>()
-}
-
-fn write_left_vertex_cover(
-    super_row_mm: &mut MemoryManager,
-    pos: &mut usize,
-    pos_lens: &mut Vec<PosLen>,
-    left_sr: &SuperRow,
-    left_num_cover: usize,
-) {
-    for eqv in 0..left_num_cover {
-        super_row_mm.write(*pos, &left_sr.images()[eqv][0] as *const _, 1);
-        pos_lens.push(PosLen { pos: *pos, len: 1 });
-        *pos += size_of::<VId>();
-    }
-}
-
-fn write_right_root(
-    super_row_mm: &mut MemoryManager,
-    pos: &mut usize,
-    pos_lens: &mut Vec<PosLen>,
-    root: VId,
-) {
-    super_row_mm.write(*pos, &root as *const _, 1);
-    pos_lens.push(PosLen { pos: *pos, len: 1 });
-    *pos += size_of::<VId>();
-}
-
-/// Try to write sequential intersections.
-///
-/// Returns true if all image sets contain values.
-fn write_sequential_intersections(
-    super_row_mm: &mut MemoryManager,
-    pos: &mut usize,
-    pos_lens: &mut Vec<PosLen>,
-    vertex_cover: &[VId],
-    left_sr: &SuperRow,
-    right_sr: &SuperRow,
-    sequential_intersections: &[(usize, usize, Option<VertexCoverConstraint>)],
-) -> bool {
-    for (l, r, vcc) in sequential_intersections {
-        let (left_image, right_image) = (left_sr.images()[*l], right_sr.images()[*r]);
-        if let Some(vcc) = vcc {
-            if write_one_sequential_intersection_with_vcc(
-                super_row_mm,
-                pos,
-                pos_lens,
-                left_image,
-                right_image,
-                vertex_cover,
-                vcc,
-            ) == 0
-            {
-                return false;
-            }
-        } else {
-            if write_one_sequential_intersection(
-                super_row_mm,
-                pos,
-                pos_lens,
-                left_image,
-                right_image,
-            ) == 0
-            {
-                return false;
-            }
+                .collect(),
+            plan,
+            top_scan: SuperRows::new(&super_row_mms[0]),
+            srs: Vec::with_capacity(plan.num_cover()),
+            vc: Vec::with_capacity(plan.num_cover()),
+            scans: Vec::with_capacity(plan.num_cover()),
         }
     }
-    true
 }
 
-fn write_one_sequential_intersection(
-    super_row_mm: &mut MemoryManager,
-    pos: &mut usize,
-    pos_lens: &mut Vec<PosLen>,
-    left_image: &[VId],
-    right_image: &[VId],
-) -> usize {
-    let mut new_pos = *pos;
-    let (mut left_iter, mut right_iter) = (left_image.iter(), right_image.iter());
-    let (mut left, mut right) = (left_iter.next(), right_iter.next());
-    while let (Some(x), Some(y)) = (left, right) {
-        match x.cmp(y) {
-            Ordering::Less => left = left_iter.next(),
-            Ordering::Equal => {
-                super_row_mm.write(new_pos, x as *const VId, 1);
-                new_pos += size_of::<VId>();
-                left = left_iter.next();
-                right = right_iter.next();
-            }
-            Ordering::Greater => right = right_iter.next(),
-        }
-    }
-    let len = (new_pos - *pos) / size_of::<VId>();
-    pos_lens.push(PosLen { pos: *pos, len });
-    *pos = new_pos;
-    len
-}
+impl<'a> Iterator for JoinedSuperRows<'a> {
+    type Item = JoinedSuperRow<'a>;
 
-fn write_one_sequential_intersection_with_vcc(
-    super_row_mm: &mut MemoryManager,
-    pos: &mut usize,
-    pos_lens: &mut Vec<PosLen>,
-    left_image: &[VId],
-    right_image: &[VId],
-    vertex_cover: &[VId],
-    vcc: &VertexCoverConstraint,
-) -> usize {
-    let mut new_pos = *pos;
-    let (mut left_iter, mut right_iter) = (left_image.iter(), right_image.iter());
-    let (mut left, mut right) = (left_iter.next(), right_iter.next());
-    while let (Some(x), Some(y)) = (left, right) {
-        match x.cmp(y) {
-            Ordering::Less => left = left_iter.next(),
-            Ordering::Equal => {
-                if vcc.f()(vertex_cover, *x) {
-                    super_row_mm.write(new_pos, x as *const VId, 1);
-                    new_pos += size_of::<VId>();
-                    left = left_iter.next();
-                    right = right_iter.next();
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.vc.is_empty() {
+                if let Some(sr0) = self.top_scan.next() {
+                    let v1 = sr0.images()[0][0];
+                    self.srs.push(sr0);
+                    self.vc.push(v1);
+                    self.scans.push(Intersection::new(
+                        self.plan.indexed_joins()[0]
+                            .scan()
+                            .iter()
+                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
+                    ));
+                } else {
+                    return None;
+                }
+            } else if self.vc.len() == self.plan.num_cover() {
+                let emit = JoinedSuperRow::new(
+                    self.vc.clone(),
+                    self.plan
+                        .intersections()
+                        .iter()
+                        .map(|x| {
+                            Intersection::new(
+                                x.intersection()
+                                    .iter()
+                                    .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
+                            )
+                        })
+                        .collect(),
+                );
+                self.vc.pop();
+                self.srs.pop();
+                return Some(emit);
+            } else {
+                if let Some(&v1) = self.scans.last_mut().and_then(|x| x.next()) {
+                    let indexed_join = &self.plan.indexed_joins()[self.vc.len() - 1];
+                    if let Some(sr1) = self.indices[indexed_join.index_id()].get(v1) {
+                        if indexed_join
+                            .contains_checks()
+                            .iter()
+                            .all(|&(eqv, vc_offset)| {
+                                sr1.images()[eqv].binary_search(&self.vc[vc_offset]).is_ok()
+                            })
+                        {
+                            self.vc.push(v1);
+                        }
+                    }
+                } else {
+                    self.scans.pop();
                 }
             }
-            Ordering::Greater => right = right_iter.next(),
         }
     }
-    let len = (new_pos - *pos) / size_of::<VId>();
-    pos_lens.push(PosLen { pos: *pos, len });
-    *pos = new_pos;
-    len
 }
 
-fn write_keeps(
-    super_row_mm: &mut MemoryManager,
-    pos: &mut usize,
-    pos_lens: &mut Vec<PosLen>,
-    vertex_cover: &[VId],
-    keep_sr: &SuperRow,
-    keeps: &[(usize, Option<VertexCoverConstraint>)],
-) {
-    keeps.iter().for_each(|(k, vcc)| {
-        let image = keep_sr.images()[*k];
-        if let Some(vcc) = vcc {
-            write_keep_with_vcc(super_row_mm, pos, pos_lens, image, vertex_cover, vcc);
-        } else {
-            write_keep(super_row_mm, pos, pos_lens, image);
-        }
-    });
-}
-
-fn write_keep(
-    super_row_mm: &mut MemoryManager,
-    pos: &mut usize,
-    pos_lens: &mut Vec<PosLen>,
-    image: &[VId],
-) {
-    super_row_mm.write(*pos, image.as_ptr(), image.len());
-    pos_lens.push(PosLen {
-        pos: *pos,
-        len: image.len(),
-    });
-    *pos += image.len() * size_of::<VId>();
-}
-
-fn write_keep_with_vcc(
-    super_row_mm: &mut MemoryManager,
-    pos: &mut usize,
-    pos_lens: &mut Vec<PosLen>,
-    image: &[VId],
-    vertex_cover: &[VId],
-    vcc: &VertexCoverConstraint,
-) {
-    let old_pos = *pos;
-    for &v in image {
-        if vcc.f()(vertex_cover, v) {
-            super_row_mm.write(*pos, &v as *const VId, 1);
-            *pos += size_of::<VId>();
-        }
-    }
-    pos_lens.push(PosLen {
-        pos: old_pos,
-        len: (*pos - old_pos) / size_of::<VId>(),
-    });
-}
-
-fn write_pos_lens(super_row_mm: &mut MemoryManager, sr_pos: usize, pos_lens: &[PosLen]) {
-    super_row_mm.write(
-        sr_pos + size_of::<usize>(),
-        pos_lens.as_ptr(),
-        pos_lens.len(),
-    );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::executor::super_row::{add_super_row, add_super_row_and_index, empty_super_row_mm};
-
-    #[test]
-    fn test_index_get_pos() {
-        let index: Vec<VIdPos> = vec![(1, 2), (3, 4), (5, 6)]
-            .into_iter()
-            .map(|(vid, pos)| VIdPos { vid, pos })
-            .collect();
-        assert_eq!(index_get_pos(index.as_slice(), 1), Some(2));
-        assert_eq!(index_get_pos(index.as_slice(), 2), None);
-    }
-
-    #[test]
-    fn test_join() {
-        let mut sr1_mm = MemoryManager::Mem(vec![]);
-        empty_super_row_mm(&mut sr1_mm, 3, 1);
-        add_super_row(&mut sr1_mm, &[1, 1, 1], &[&[0], &[1], &[5]]);
-        add_super_row(&mut sr1_mm, &[1, 1, 1], &[&[3], &[4], &[2]]);
-        let mut sr2_mm = MemoryManager::Mem(vec![]);
-        let mut index_mm = MemoryManager::Mem(vec![]);
-        empty_super_row_mm(&mut sr2_mm, 2, 1);
-        add_super_row_and_index(&mut sr2_mm, &mut index_mm, &[1, 2], &[&[1], &[2, 5]]);
-        add_super_row_and_index(&mut sr2_mm, &mut index_mm, &[1, 2], &[&[4], &[2, 5]]);
-        let mut sr_mm = MemoryManager::Mem(vec![]);
-        join(
-            &mut sr_mm,
-            4,
-            2,
-            &sr1_mm,
-            &sr2_mm,
-            &index_mm,
-            1,
-            &[(2, 1, None)],
-            &[],
-            &[(1, None)],
-        );
-        let mut sr_mm1 = MemoryManager::Mem(vec![]);
-        empty_super_row_mm(&mut sr_mm1, 4, 2);
-        add_super_row(&mut sr_mm1, &[1, 1, 1, 2], &[&[0], &[1], &[5], &[2, 5]]);
-        add_super_row(&mut sr_mm1, &[1, 1, 1, 2], &[&[3], &[4], &[2], &[2, 5]]);
-        assert_eq!(
-            sr_mm.read_slice::<u8>(0, sr_mm.len()),
-            sr_mm1.read_slice::<u8>(0, sr_mm1.len())
-        );
-    }
+pub fn join<'a>(
+    super_row_mms: &'a [MemoryManager],
+    index_mms: &'a [MemoryManager],
+    plan: &'a JoinPlan,
+) -> JoinedSuperRows<'a> {
+    JoinedSuperRows::new(super_row_mms, index_mms, plan)
 }

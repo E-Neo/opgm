@@ -9,7 +9,7 @@ use crate::{
         },
     },
     data_graph::DataGraph,
-    executor::{decompress, join, match_characteristics, write_results},
+    executor::{decompress, deprecated_join, match_characteristics, write_results},
     memory_manager::{MemoryManager, MmapFile},
     pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
     planner::decompose_stars,
@@ -777,7 +777,7 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     pub fn execute_join(&self, super_row_mms: &mut [MemoryManager], index_mms: &[MemoryManager]) {
         self.join_plan().iter().for_each(|info| {
             let (wrote_mms, mms) = super_row_mms.split_at_mut(info.id());
-            join(
+            deprecated_join(
                 &mut mms[0],
                 info.num_eqvs(),
                 info.vertex_cover().len(),
