@@ -290,6 +290,19 @@ pub fn add_super_row_and_index(
     );
 }
 
+pub fn add_super_row_and_index_compact(
+    super_row_mm: &mut MemoryManager,
+    index_mm: &mut MemoryManager,
+    super_row: &[&[VId]],
+) {
+    add_super_row_and_index(
+        super_row_mm,
+        index_mm,
+        &super_row.iter().map(|sr| sr.len()).collect::<Vec<usize>>(),
+        super_row,
+    );
+}
+
 fn calculate_num_byte(num_eqvs: usize, bounds: &[usize]) -> usize {
     size_of::<usize>()
         + num_eqvs * size_of::<PosLen>()

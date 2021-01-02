@@ -4,7 +4,10 @@ use crate::{
     types::{VId, VIdPos},
 };
 use itertools::{EitherOrBoth, Itertools};
-use std::{collections::HashMap, mem::size_of};
+use std::{
+    collections::{HashMap, HashSet},
+    mem::size_of,
+};
 
 pub enum IndexType {
     Sorted,
@@ -18,6 +21,18 @@ pub struct IndexedJoinPlan {
 }
 
 impl IndexedJoinPlan {
+    pub fn new(
+        scan: Vec<(usize, usize)>,
+        index_id: usize,
+        contains_checks: Vec<(usize, usize)>,
+    ) -> Self {
+        Self {
+            scan,
+            index_id,
+            contains_checks,
+        }
+    }
+
     pub fn scan(&self) -> &[(usize, usize)] {
         &self.scan
     }
@@ -31,33 +46,17 @@ impl IndexedJoinPlan {
     }
 }
 
-impl IndexedJoinPlan {
-    fn new(
-        scan: Vec<(usize, usize)>,
-        index_id: usize,
-        contains_checks: Vec<(usize, usize)>,
-    ) -> Self {
-        Self {
-            scan,
-            index_id,
-            contains_checks,
-        }
-    }
-}
-
 pub struct IntersectionPlan {
     intersection: Vec<(usize, usize)>, // (sr, eqv)
 }
 
 impl IntersectionPlan {
+    pub fn new(intersection: Vec<(usize, usize)>) -> Self {
+        Self { intersection }
+    }
+
     pub fn intersection(&self) -> &[(usize, usize)] {
         &self.intersection
-    }
-}
-
-impl IntersectionPlan {
-    fn new(intersection: Vec<(usize, usize)>) -> Self {
-        Self { intersection }
     }
 }
 
@@ -69,6 +68,20 @@ pub struct JoinPlan {
 }
 
 impl JoinPlan {
+    pub fn new(
+        num_cover: usize,
+        index_type: IndexType,
+        indexed_joins: Vec<IndexedJoinPlan>,
+        intersections: Vec<IntersectionPlan>,
+    ) -> Self {
+        Self {
+            num_cover,
+            index_type,
+            indexed_joins,
+            intersections,
+        }
+    }
+
     pub fn num_cover(&self) -> usize {
         self.num_cover
     }
@@ -83,22 +96,6 @@ impl JoinPlan {
 
     pub fn intersections(&self) -> &[IntersectionPlan] {
         &self.intersections
-    }
-}
-
-impl JoinPlan {
-    fn new(
-        num_cover: usize,
-        index_type: IndexType,
-        indexed_joins: Vec<IndexedJoinPlan>,
-        intersections: Vec<IntersectionPlan>,
-    ) -> Self {
-        Self {
-            num_cover,
-            index_type,
-            indexed_joins,
-            intersections,
-        }
     }
 }
 
@@ -200,6 +197,72 @@ impl<'a> JoinedSuperRow<'a> {
             leaves,
         }
     }
+
+    pub fn decompress(mut self) -> JoinedSuperRowIter {
+        JoinedSuperRowIter::new(
+            self.vertex_cover,
+            self.leaves
+                .iter_mut()
+                .map(|x| x.map(|&vid| vid).collect())
+                .collect(),
+        )
+    }
+}
+
+pub struct JoinedSuperRowIter {
+    vertex_cover: Vec<VId>,
+    leaves: Vec<Vec<VId>>,
+    leaves_offsets: Vec<usize>,
+    row: Vec<VId>,
+    row_set: HashSet<VId>,
+}
+
+impl JoinedSuperRowIter {
+    fn new(vertex_cover: Vec<VId>, leaves: Vec<Vec<VId>>) -> Self {
+        let leaves_offsets = vec![0; leaves.len()];
+        let row = vertex_cover.clone();
+        let row_set = vertex_cover.iter().map(|&vid| vid).collect();
+        Self {
+            vertex_cover,
+            leaves,
+            leaves_offsets,
+            row,
+            row_set,
+        }
+    }
+}
+
+impl Iterator for JoinedSuperRowIter {
+    type Item = Vec<VId>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.row_set.len() < self.row.len() {
+            return None;
+        }
+        loop {
+            let col = self.row.len() - self.vertex_cover.len();
+            if col == self.leaves.len() {
+                let row = self.row.clone();
+                if let Some(v) = self.row.pop() {
+                    self.row_set.remove(&v);
+                }
+                return Some(row);
+            } else if self.leaves_offsets[col] < self.leaves[col].len() {
+                let v = self.leaves[col][self.leaves_offsets[col]];
+                if self.row_set.insert(v) {
+                    self.row.push(v);
+                }
+                self.leaves_offsets[col] += 1;
+            } else if col == 0 {
+                return None;
+            } else {
+                self.leaves_offsets[col] = 0;
+                if let Some(v) = self.row.pop() {
+                    self.row_set.remove(&v);
+                }
+            }
+        }
+    }
 }
 
 pub struct JoinedSuperRows<'a> {
@@ -270,6 +333,7 @@ impl<'a> Iterator for JoinedSuperRows<'a> {
                 );
                 self.vc.pop();
                 self.srs.pop();
+                self.scans.pop();
                 return Some(emit);
             } else {
                 if let Some(&v1) = self.scans.last_mut().and_then(|x| x.next()) {
@@ -282,10 +346,18 @@ impl<'a> Iterator for JoinedSuperRows<'a> {
                                 sr1.images()[eqv].binary_search(&self.vc[vc_offset]).is_ok()
                             })
                         {
+                            self.srs.push(sr1);
                             self.vc.push(v1);
+                            self.scans.push(Intersection::new(
+                                indexed_join
+                                    .scan()
+                                    .iter()
+                                    .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
+                            ));
                         }
                     }
                 } else {
+                    self.vc.pop();
                     self.scans.pop();
                 }
             }
@@ -299,4 +371,75 @@ pub fn join<'a>(
     plan: &'a JoinPlan,
 ) -> JoinedSuperRows<'a> {
     JoinedSuperRows::new(super_row_mms, index_mms, plan)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::{add_super_row_and_index_compact, empty_super_row_mm};
+
+    #[test]
+    fn test_joined_super_row_iter() {
+        assert_eq!(
+            JoinedSuperRowIter::new(vec![1, 2, 2], vec![vec![5, 6]]).count(),
+            0
+        );
+        assert_eq!(
+            JoinedSuperRowIter::new(vec![1, 2, 3], vec![vec![5, 6]]).collect::<Vec<_>>(),
+            vec![vec![1, 2, 3, 5], vec![1, 2, 3, 6]]
+        );
+    }
+
+    #[test]
+    fn test_q02() {
+        let mut super_row_mms = vec![MemoryManager::Mem(vec![]), MemoryManager::Mem(vec![])];
+        let mut index_mms = vec![MemoryManager::Mem(vec![]), MemoryManager::Mem(vec![])];
+        empty_super_row_mm(&mut super_row_mms[0], 2, 1);
+        empty_super_row_mm(&mut super_row_mms[1], 3, 1);
+        let srs: Vec<&[&[VId]]> = vec![
+            &[&[1], &[2, 3, 4]],
+            &[&[2], &[5, 6]],
+            &[&[3], &[5, 6]],
+            &[&[4], &[5, 6]],
+        ];
+        for sr in srs {
+            add_super_row_and_index_compact(&mut super_row_mms[0], &mut index_mms[0], sr);
+        }
+        let srs: Vec<&[&[VId]]> = vec![
+            &[&[2], &[5, 6], &[1]],
+            &[&[3], &[5, 6], &[1]],
+            &[&[4], &[5, 6], &[1]],
+        ];
+        for sr in srs {
+            add_super_row_and_index_compact(&mut super_row_mms[1], &mut index_mms[1], sr);
+        }
+        let plan = JoinPlan::new(
+            3,
+            IndexType::Hash,
+            vec![
+                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)]),
+                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)]),
+            ],
+            vec![IntersectionPlan::new(vec![(1, 1), (2, 1)])],
+        );
+        assert_eq!(
+            join(&super_row_mms, &index_mms, &plan)
+                .flat_map(|sr| sr.decompress())
+                .collect::<Vec<_>>(),
+            vec![
+                vec![1, 2, 3, 5],
+                vec![1, 2, 3, 6],
+                vec![1, 2, 4, 5],
+                vec![1, 2, 4, 6],
+                vec![1, 3, 2, 5],
+                vec![1, 3, 2, 6],
+                vec![1, 3, 4, 5],
+                vec![1, 3, 4, 6],
+                vec![1, 4, 2, 5],
+                vec![1, 4, 2, 6],
+                vec![1, 4, 3, 5],
+                vec![1, 4, 3, 6]
+            ]
+        );
+    }
 }
