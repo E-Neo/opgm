@@ -8,7 +8,7 @@ use opgm::{
     data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
     executor::{SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
-    planner::{MemoryManagerType, Task},
+    planner::{IndexType, MemoryManagerType, Task},
 };
 use rayon::prelude::*;
 use std::{
@@ -82,16 +82,12 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
             matches.value_of("directory"),
             matches.value_of("name"),
         ))
-        .join_sr_mm_type(parse_mm_type(
-            matches.value_of("join-mm-type").unwrap(),
-            matches.value_of("directory"),
-            matches.value_of("name"),
-        ))
         .index_mm_type(parse_mm_type(
             matches.value_of("index-mm-type").unwrap(),
             matches.value_of("directory"),
             matches.value_of("name"),
         ))
+        .index_type(parse_index_type(matches.value_of("index-type").unwrap()))
         .plan();
     let (mut super_row_mms, mut index_mms) = plan.allocate();
     let mut time_now = std::time::Instant::now();
@@ -114,10 +110,10 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
             if plan.stars().is_empty() {
                 0
             } else {
-                let vertex_eqv: Vec<_> = (if plan.join_plan().is_empty() {
+                let vertex_eqv: Vec<_> = (if plan.deprecated_join_plan().is_empty() {
                     plan.stars().last().unwrap().vertex_eqv()
                 } else {
-                    plan.join_plan().last().unwrap().vertex_eqv()
+                    plan.deprecated_join_plan().last().unwrap().vertex_eqv()
                 })
                 .iter()
                 .map(|(&vertex, &eqv)| (vertex, eqv))
@@ -186,7 +182,15 @@ fn parse_mm_type<'a>(
         "mem" => MemoryManagerType::Mem,
         "mmap" => MemoryManagerType::Mmap(PathBuf::from(directory.unwrap()), name.unwrap()),
         "sink" => MemoryManagerType::Sink,
-        _ => panic!("Invalid mm-type"),
+        _ => unreachable!(),
+    }
+}
+
+fn parse_index_type(index_type: &str) -> IndexType {
+    match index_type {
+        "sorted" => IndexType::Sorted,
+        "hash" => IndexType::Hash,
+        _ => unreachable!(),
     }
 }
 
@@ -293,20 +297,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .possible_values(&["mem", "mmap", "sink"]),
                 )
                 .arg(
-                    Arg::with_name("join-mm-type")
-                        .help("The MemoryManager for join results")
-                        .long("join-mm-type")
-                        .takes_value(true)
-                        .default_value("mmap")
-                        .possible_values(&["mem", "mmap", "sink"]),
-                )
-                .arg(
                     Arg::with_name("index-mm-type")
                         .help("The MemoryManager for indices")
                         .long("index-mm-type")
                         .takes_value(true)
                         .default_value("mmap")
                         .possible_values(&["mem", "mmap", "sink"]),
+                )
+                .arg(
+                    Arg::with_name("index-type")
+                        .long("index-type")
+                        .takes_value(true)
+                        .default_value("sorted")
+                        .possible_values(&["sorted", "hash"]),
                 ),
         )
         .subcommand(

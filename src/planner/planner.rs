@@ -25,6 +25,12 @@ pub enum MemoryManagerType<'a> {
     Sink,
 }
 
+#[derive(Clone)]
+pub enum IndexType {
+    Sorted,
+    Hash,
+}
+
 pub struct Task<'a, 'b> {
     data_graph: &'a DataGraph,
     pattern_graph: PatternGraph<'b>,
@@ -58,8 +64,8 @@ pub struct Planner<'a, 'b, 'c> {
     pattern_graph: &'a PatternGraph<'b>,
     global_constraints: &'a mut Vec<Expr>,
     star_sr_mm_type: MemoryManagerType<'c>,
-    join_sr_mm_type: MemoryManagerType<'c>,
     index_mm_type: MemoryManagerType<'c>,
+    index_type: IndexType,
 }
 
 impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
@@ -73,8 +79,8 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
             pattern_graph,
             global_constraints,
             star_sr_mm_type: MemoryManagerType::Mem,
-            join_sr_mm_type: MemoryManagerType::Mem,
             index_mm_type: MemoryManagerType::Mem,
+            index_type: IndexType::Sorted,
         }
     }
 
@@ -83,13 +89,13 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
         self
     }
 
-    pub fn join_sr_mm_type(mut self, mm_type: MemoryManagerType<'c>) -> Self {
-        self.join_sr_mm_type = mm_type;
+    pub fn index_mm_type(mut self, mm_type: MemoryManagerType<'c>) -> Self {
+        self.index_mm_type = mm_type;
         self
     }
 
-    pub fn index_mm_type(mut self, mm_type: MemoryManagerType<'c>) -> Self {
-        self.index_mm_type = mm_type;
+    pub fn index_type(mut self, index_type: IndexType) -> Self {
+        self.index_type = index_type;
         self
     }
 
@@ -99,17 +105,21 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
         let stars = self.create_stars(&roots, &characteristic_ids);
         let stars_plan = self.create_stars_plan(&characteristic_ids);
         let mut global_constraints = std::mem::replace(self.global_constraints, vec![]);
-        let join_plan =
-            self.create_join_plan(&stars, characteristic_ids.len(), &mut global_constraints);
+        let deprecated_join_plan = self.deprecated_create_join_plan(
+            &stars,
+            characteristic_ids.len(),
+            &mut global_constraints,
+        );
+        let join_plan = self.create_join_plan(&stars);
         let global_constraint = if stars.is_empty() {
             None
         } else {
             extract_global_constraint(
                 &mut global_constraints,
-                if join_plan.is_empty() {
+                if deprecated_join_plan.is_empty() {
                     stars.last().unwrap().vertex_eqv()
                 } else {
-                    join_plan.last().unwrap().vertex_eqv()
+                    deprecated_join_plan.last().unwrap().vertex_eqv()
                 },
             )
         };
@@ -117,13 +127,12 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
             data_graph: self.data_graph,
             pattern_graph: self.pattern_graph,
             star_sr_mm_type: self.star_sr_mm_type,
-            join_sr_mm_type: self.join_sr_mm_type,
             star_sr_mms_len: characteristic_ids.len(),
-            join_sr_mms_len: roots.len() - 1,
             index_mm_type: self.index_mm_type,
             index_mm_len: characteristic_ids.len(),
             stars,
             stars_plan,
+            deprecated_join_plan,
             join_plan,
             global_constraint,
         }
@@ -187,7 +196,128 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
             .collect()
     }
 
-    fn create_join_plan(
+    fn create_join_plan(&self, stars: &[StarInfo]) -> Option<JoinPlan> {
+        if stars.len() < 2 {
+            None
+        } else {
+            let mut uid_sr_eqvs: HashMap<VId, BTreeSet<(usize, usize)>> = HashMap::new();
+            for (star_id, star) in stars.iter().enumerate() {
+                for (&uid, &eqv) in star.vertex_eqv() {
+                    uid_sr_eqvs.entry(uid).or_default().insert((star_id, eqv));
+                }
+            }
+            let leaves = self.get_leaves(stars);
+            let vertex_eqv = self.create_vertex_eqv(stars, &leaves, &uid_sr_eqvs);
+            let eqv_pivots: BTreeMap<usize, VId> =
+                vertex_eqv.iter().map(|(&uid, &eqv)| (eqv, uid)).collect();
+            Some(JoinPlan::new(
+                vertex_eqv,
+                stars.len(),
+                self.index_type.clone(),
+                self.create_indexed_joins(stars, &uid_sr_eqvs),
+                eqv_pivots
+                    .iter()
+                    .skip(stars.len())
+                    .map(|(_, pivot)| {
+                        IntersectionPlan::new(
+                            uid_sr_eqvs.get(pivot).unwrap().iter().map(|&x| x).collect(),
+                        )
+                    })
+                    .collect(),
+            ))
+        }
+    }
+
+    fn get_leaves(&self, stars: &[StarInfo]) -> BTreeSet<VId> {
+        self.pattern_graph
+            .vertices()
+            .map(|(uid, _)| uid)
+            .collect::<BTreeSet<VId>>()
+            .difference(&stars.iter().map(|star| star.root()).collect())
+            .map(|&uid| uid)
+            .collect()
+    }
+
+    fn create_vertex_eqv(
+        &self,
+        stars: &[StarInfo],
+        leaves: &BTreeSet<VId>,
+        uid_sr_eqvs: &HashMap<VId, BTreeSet<(usize, usize)>>,
+    ) -> HashMap<VId, usize> {
+        let mut sr_eqvs_leaves: HashMap<&BTreeSet<(usize, usize)>, BTreeSet<VId>> =
+            HashMap::with_capacity(leaves.len());
+        leaves.iter().for_each(|&leaf| {
+            sr_eqvs_leaves
+                .entry(uid_sr_eqvs.get(&leaf).unwrap())
+                .or_default()
+                .insert(leaf);
+        });
+        let mut vertex_eqv: HashMap<VId, usize> = stars
+            .iter()
+            .enumerate()
+            .map(|(eqv, star)| (star.root(), eqv))
+            .collect();
+        let mut eqv = stars.len();
+        let mut visited = HashSet::new();
+        for leaf in leaves {
+            if !visited.contains(leaf) {
+                for &uid in sr_eqvs_leaves.get(uid_sr_eqvs.get(leaf).unwrap()).unwrap() {
+                    vertex_eqv.insert(uid, eqv);
+                    visited.insert(uid);
+                }
+                eqv += 1;
+            }
+        }
+        vertex_eqv
+    }
+
+    fn create_indexed_joins(
+        &self,
+        stars: &[StarInfo],
+        uid_sr_eqvs: &HashMap<VId, BTreeSet<(usize, usize)>>,
+    ) -> Vec<IndexedJoinPlan> {
+        stars
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(i, star)| {
+                let vc_offsets: HashMap<VId, usize> = stars
+                    .iter()
+                    .enumerate()
+                    .take(i)
+                    .map(|(sr, star)| (star.root(), sr))
+                    .collect();
+                IndexedJoinPlan::new(
+                    uid_sr_eqvs
+                        .get(&star.root())
+                        .unwrap()
+                        .iter()
+                        .filter_map(|&(sr, eqv)| if sr < i { Some((sr, eqv)) } else { None })
+                        .collect(),
+                    star.id(),
+                    star.vertex_eqv()
+                        .iter()
+                        .filter_map(|(&uid, &eqv)| {
+                            if uid != star.root() {
+                                Some((uid, eqv))
+                            } else {
+                                None
+                            }
+                        })
+                        .filter_map(|(uid, eqv)| {
+                            if let Some(&vc_offset) = vc_offsets.get(&uid) {
+                                Some((eqv, vc_offset))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    fn deprecated_create_join_plan(
         &self,
         stars: &[StarInfo],
         mut id: usize,
@@ -707,19 +837,110 @@ impl JoinInfo {
     }
 }
 
+pub struct IndexedJoinPlan {
+    scan: Vec<(usize, usize)>, // (sr, eqv)
+    index_id: usize,
+    contains_checks: Vec<(usize, usize)>, // (eqv, vc_offset)
+}
+
+impl IndexedJoinPlan {
+    pub fn new(
+        scan: Vec<(usize, usize)>,
+        index_id: usize,
+        contains_checks: Vec<(usize, usize)>,
+    ) -> Self {
+        Self {
+            scan,
+            index_id,
+            contains_checks,
+        }
+    }
+
+    pub fn scan(&self) -> &[(usize, usize)] {
+        &self.scan
+    }
+
+    pub fn index_id(&self) -> usize {
+        self.index_id
+    }
+
+    pub fn contains_checks(&self) -> &[(usize, usize)] {
+        &self.contains_checks
+    }
+}
+
+pub struct IntersectionPlan {
+    intersection: Vec<(usize, usize)>, // (sr, eqv)
+}
+
+impl IntersectionPlan {
+    pub fn new(intersection: Vec<(usize, usize)>) -> Self {
+        Self { intersection }
+    }
+
+    pub fn intersection(&self) -> &[(usize, usize)] {
+        &self.intersection
+    }
+}
+
+pub struct JoinPlan {
+    vertex_eqv: HashMap<VId, usize>,
+    num_cover: usize,
+    index_type: IndexType,
+    indexed_joins: Vec<IndexedJoinPlan>,
+    intersections: Vec<IntersectionPlan>,
+}
+
+impl JoinPlan {
+    pub fn new(
+        vertex_eqv: HashMap<VId, usize>,
+        num_cover: usize,
+        index_type: IndexType,
+        indexed_joins: Vec<IndexedJoinPlan>,
+        intersections: Vec<IntersectionPlan>,
+    ) -> Self {
+        Self {
+            vertex_eqv,
+            num_cover,
+            index_type,
+            indexed_joins,
+            intersections,
+        }
+    }
+
+    pub fn vertex_eqv(&self) -> &HashMap<VId, usize> {
+        &self.vertex_eqv
+    }
+
+    pub fn num_cover(&self) -> usize {
+        self.num_cover
+    }
+
+    pub fn index_type(&self) -> &IndexType {
+        &self.index_type
+    }
+
+    pub fn indexed_joins(&self) -> &[IndexedJoinPlan] {
+        &self.indexed_joins
+    }
+
+    pub fn intersections(&self) -> &[IntersectionPlan] {
+        &self.intersections
+    }
+}
+
 /// The plan to match the `pattern_graph` in `data_graph`.
 pub struct Plan<'a, 'b, 'c> {
     data_graph: &'a DataGraph,
     pattern_graph: &'a PatternGraph<'b>,
     star_sr_mm_type: MemoryManagerType<'c>,
-    join_sr_mm_type: MemoryManagerType<'c>,
     star_sr_mms_len: usize,
-    join_sr_mms_len: usize,
     index_mm_type: MemoryManagerType<'c>,
     index_mm_len: usize,
     stars: Vec<StarInfo<'a, 'b>>,
     stars_plan: Vec<(VLabel, Vec<CharacteristicInfo<'a, 'b>>)>,
-    join_plan: Vec<JoinInfo>,
+    join_plan: Option<JoinPlan>,
+    deprecated_join_plan: Vec<JoinInfo>,
     global_constraint: Option<GlobalConstraint>,
 }
 
@@ -748,8 +969,12 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
         &self.stars_plan
     }
 
-    pub fn join_plan(&self) -> &[JoinInfo] {
+    pub fn join_plan(&self) -> &Option<JoinPlan> {
         &self.join_plan
+    }
+
+    pub fn deprecated_join_plan(&self) -> &[JoinInfo] {
+        &self.deprecated_join_plan
     }
 
     pub fn global_constraint(&self) -> &Option<GlobalConstraint> {
@@ -759,7 +984,7 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     /// Returns `(super_row_mms, index_mms)`.
     pub fn allocate(&self) -> (Vec<MemoryManager>, Vec<MemoryManager>) {
         (
-            self.create_super_row_mms(self.star_sr_mms_len + self.join_sr_mms_len),
+            self.create_super_row_mms(self.star_sr_mms_len),
             self.create_index_mms(self.index_mm_len),
         )
     }
@@ -775,7 +1000,7 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     }
 
     pub fn execute_join(&self, super_row_mms: &mut [MemoryManager], index_mms: &[MemoryManager]) {
-        self.join_plan().iter().for_each(|info| {
+        self.deprecated_join_plan().iter().for_each(|info| {
             let (wrote_mms, mms) = super_row_mms.split_at_mut(info.id());
             deprecated_join(
                 &mut mms[0],
@@ -799,10 +1024,10 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     ) -> std::io::Result<usize> {
         let vertex_eqv = if self.stars().is_empty() {
             return Ok(0);
-        } else if self.join_plan().is_empty() {
+        } else if self.deprecated_join_plan().is_empty() {
             self.stars().last().unwrap().vertex_eqv()
         } else {
-            self.join_plan().last().unwrap().vertex_eqv()
+            self.deprecated_join_plan().last().unwrap().vertex_eqv()
         };
         let super_row_mm = super_row_mms.last().unwrap();
         let mut vertex_eqv: Vec<(VId, usize)> = vertex_eqv
@@ -830,18 +1055,12 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
 impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     fn create_super_row_mms(&self, count: usize) -> Vec<MemoryManager> {
         (0..count)
-            .map(|id| {
-                match if id < self.star_sr_mms_len {
-                    &self.star_sr_mm_type
-                } else {
-                    &self.join_sr_mm_type
-                } {
-                    MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
-                    MemoryManagerType::Mmap(path, name) => {
-                        MemoryManager::Mmap(MmapFile::new(path.join(format!("{}{}.sr", name, id))))
-                    }
-                    MemoryManagerType::Sink => MemoryManager::Sink,
+            .map(|id| match &self.star_sr_mm_type {
+                MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
+                MemoryManagerType::Mmap(path, name) => {
+                    MemoryManager::Mmap(MmapFile::new(path.join(format!("{}{}.sr", name, id))))
                 }
+                MemoryManagerType::Sink => MemoryManager::Sink,
             })
             .collect()
     }
@@ -966,9 +1185,9 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     }
 
     fn fmt_join_plan(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !self.join_plan().is_empty() {
+        if !self.deprecated_join_plan().is_empty() {
             writeln!(f, "Join Plan")?;
-            for info in self.join_plan() {
+            for info in self.deprecated_join_plan() {
                 writeln!(
                     f,
                     "  Join [{}] = [{}] x [{}]",
