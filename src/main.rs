@@ -62,6 +62,7 @@ fn handle_displaysr(matches: &ArgMatches) -> std::io::Result<()> {
 }
 
 fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+    let mut stderr = BufWriter::new(std::io::stderr());
     let start_time = std::time::Instant::now();
     let mut file = File::open(matches.value_of("DATAGRAPH").unwrap())?;
     let data_graph = DataGraph::new(if matches.is_present("db-in-memory") {
@@ -91,58 +92,45 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         .plan();
     let (mut super_row_mms, mut index_mms) = plan.allocate();
     let mut time_now = std::time::Instant::now();
-    plan.execute_stars_matching(&mut super_row_mms, &mut index_mms);
+    plan.execute_stars_plan(&mut super_row_mms, &mut index_mms);
     writeln!(
-        std::io::stderr(),
+        &mut stderr,
         "stars_time: {}",
         (std::time::Instant::now() - time_now).as_millis()
     )?;
-    time_now = std::time::Instant::now();
-    plan.execute_join(&mut super_row_mms, &mut index_mms);
-    writeln!(
-        std::io::stderr(),
-        "join_time: {}",
-        (std::time::Instant::now() - time_now).as_millis()
-    )?;
-    time_now = std::time::Instant::now();
-    if !matches.is_present("no-outfile") {
-        let num_rows = if matches.is_present("count-rows") {
-            if plan.stars().is_empty() {
-                0
+    if matches.is_present("count-rows") {
+        time_now = std::time::Instant::now();
+        let num_rows = if plan.stars().is_empty() {
+            0
+        } else if let Some(srs) = plan.execute_join_plan(&super_row_mms, &index_mms) {
+            if let Some(gc) = plan.global_constraint() {
+                srs.par_bridge()
+                    .map(|sr| {
+                        sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
+                            .filter(|row| gc.f()(row))
+                            .count()
+                    })
+                    .sum()
             } else {
-                let vertex_eqv: Vec<_> = (if plan.deprecated_join_plan().is_empty() {
-                    plan.stars().last().unwrap().vertex_eqv()
-                } else {
-                    plan.deprecated_join_plan().last().unwrap().vertex_eqv()
-                })
-                .iter()
-                .map(|(&vertex, &eqv)| (vertex, eqv))
-                .collect();
-                let iter = SuperRows::new(super_row_mms.last().unwrap()).par_bridge();
-                if let Some(gc) = plan.global_constraint() {
-                    iter.map(|sr| sr.decompress(&vertex_eqv).filter(|row| gc.f()(row)).count())
-                        .sum()
-                } else {
-                    iter.map(|sr| sr.decompress(&vertex_eqv).count()).sum()
-                }
+                srs.par_bridge()
+                    .map(|sr| {
+                        sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
+                            .count()
+                    })
+                    .sum()
             }
-        } else if matches.is_present("to-stdout") {
-            plan.execute_write_results(&mut BufWriter::new(std::io::stdout()), &super_row_mms)?
         } else {
-            plan.execute_write_results(
-                &mut BufWriter::new(File::create(matches.value_of("OUTFILE").unwrap())?),
-                &super_row_mms,
-            )?
+            todo!()
         };
         writeln!(
-            std::io::stderr(),
-            "decompress_time: {}",
+            &mut stderr,
+            "join_decompress_time: {}",
             (std::time::Instant::now() - time_now).as_millis()
         )?;
-        writeln!(std::io::stderr(), "num_rows: {}", num_rows)?;
+        writeln!(&mut stderr, "num_rows: {}", num_rows)?;
     }
     writeln!(
-        std::io::stderr(),
+        &mut stderr,
         "total_time: {}",
         (std::time::Instant::now() - start_time).as_millis()
     )?;
@@ -233,30 +221,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .about("Matches the query in the data graph")
                 .arg(Arg::with_name("DATAGRAPH").required(true))
                 .arg(Arg::with_name("QUERY").required(true))
-                .arg(Arg::with_name("OUTFILE").required_unless_one(&[
-                    "count-rows",
-                    "to-stdout",
-                    "no-outfile",
-                ]))
                 .arg(
                     Arg::with_name("count-rows")
                         .help("Counts rows of matching results")
                         .long("count-rows")
                         .takes_value(false)
                         .conflicts_with_all(&["to-stdout", "no-outfile"]),
-                )
-                .arg(
-                    Arg::with_name("to-stdout")
-                        .help("Writes matching results to stdout")
-                        .long("to-stdout")
-                        .takes_value(false)
-                        .conflicts_with_all(&["no-outfile"]),
-                )
-                .arg(
-                    Arg::with_name("no-outfile")
-                        .help("Disables decompression process")
-                        .long("no-outfile")
-                        .takes_value(false),
                 )
                 .arg(
                     Arg::with_name("db-in-memory")

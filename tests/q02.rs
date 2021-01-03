@@ -43,18 +43,21 @@ fn test_match() {
         vec![2, 3]
     );
     let (mut super_row_mms, mut index_mms) = plan.allocate();
-    assert_eq!(super_row_mms.len(), 3);
+    assert_eq!(super_row_mms.len(), 2);
     assert_eq!(index_mms.len(), 2);
-    let mut result = vec![];
-    plan.execute(&mut result, &mut super_row_mms, &mut index_mms)
-        .unwrap();
+    plan.execute_stars_plan(&mut super_row_mms, &mut index_mms);
+    let result: Vec<_> = plan
+        .execute_join_plan(&super_row_mms, &mut index_mms)
+        .unwrap()
+        .flat_map(|sr| sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv()))
+        .collect();
     assert_eq!(
-        std::str::from_utf8(&result).unwrap(),
-        "u1,u2,u3,u4
-1,2,3,4
-1,2,3,14
-11,2,3,4
-11,2,3,14
-"
+        result,
+        vec![
+            vec![2, 3, 1, 4],
+            vec![2, 3, 1, 14],
+            vec![2, 3, 11, 4],
+            vec![2, 3, 11, 14]
+        ]
     );
 }

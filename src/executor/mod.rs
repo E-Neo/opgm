@@ -1,8 +1,7 @@
 //! The executor.
 
 pub use decompress::{decompress, write_results};
-pub use deprecated_join::deprecated_join;
-pub use join::join;
+pub use join::{join, JoinedSuperRow, JoinedSuperRowIter, JoinedSuperRows};
 pub use match_characteristics::match_characteristics;
 pub use super_row::{
     add_super_row, add_super_row_and_index, add_super_row_and_index_compact, empty_super_row_mm,
@@ -14,7 +13,6 @@ pub(crate) use super_row::{
 };
 
 mod decompress;
-mod deprecated_join;
 mod join;
 mod match_characteristics;
 mod super_row;

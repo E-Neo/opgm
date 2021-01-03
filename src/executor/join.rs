@@ -11,13 +11,13 @@ use std::{
 };
 
 struct Intersection<'a> {
-    inner: Box<dyn Iterator<Item = &'a VId> + 'a>,
+    inner: Box<dyn Iterator<Item = &'a VId> + 'a + Send + Sync>,
 }
 
 impl<'a> Intersection<'a> {
     fn new<I: IntoIterator<Item = &'a [VId]>>(images: I) -> Self {
         let mut tail = images.into_iter();
-        let mut inner: Box<dyn Iterator<Item = &'a VId> + 'a> =
+        let mut inner: Box<dyn Iterator<Item = &'a VId> + 'a + Send + Sync> =
             Box::new(tail.next().unwrap().into_iter());
         for other in tail {
             inner = Box::new(inner.merge_join_by(other, |x, y| x.cmp(y)).filter_map(|x| {
@@ -189,20 +189,20 @@ impl Iterator for JoinedSuperRowIter {
     }
 }
 
-pub struct JoinedSuperRows<'a> {
+pub struct JoinedSuperRows<'a, 'b> {
     indices: Vec<Index<'a>>,
-    plan: &'a JoinPlan,
+    plan: &'b JoinPlan,
     top_scan: SuperRows<'a>,
     srs: Vec<SuperRow<'a>>,
     vc: Vec<VId>,
     scans: Vec<Intersection<'a>>,
 }
 
-impl<'a> JoinedSuperRows<'a> {
+impl<'a, 'b> JoinedSuperRows<'a, 'b> {
     fn new(
         super_row_mms: &'a [MemoryManager],
         index_mms: &'a [MemoryManager],
-        plan: &'a JoinPlan,
+        plan: &'b JoinPlan,
     ) -> Self {
         Self {
             indices: super_row_mms
@@ -221,7 +221,7 @@ impl<'a> JoinedSuperRows<'a> {
     }
 }
 
-impl<'a> Iterator for JoinedSuperRows<'a> {
+impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
     type Item = JoinedSuperRow<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -289,11 +289,11 @@ impl<'a> Iterator for JoinedSuperRows<'a> {
     }
 }
 
-pub fn join<'a>(
+pub fn join<'a, 'b>(
     super_row_mms: &'a [MemoryManager],
     index_mms: &'a [MemoryManager],
-    plan: &'a JoinPlan,
-) -> JoinedSuperRows<'a> {
+    plan: &'b JoinPlan,
+) -> JoinedSuperRows<'a, 'b> {
     JoinedSuperRows::new(super_row_mms, index_mms, plan)
 }
 

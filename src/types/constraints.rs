@@ -8,11 +8,11 @@ use std::{
 
 /// Vertex constraint type.
 pub struct VertexConstraint {
-    f: Box<dyn Fn(VId) -> bool>,
+    f: Box<dyn Fn(VId) -> bool + Send + Sync>,
 }
 
 impl VertexConstraint {
-    pub fn new(f: Box<dyn Fn(VId) -> bool>) -> Self {
+    pub fn new(f: Box<dyn Fn(VId) -> bool + Send + Sync>) -> Self {
         Self { f }
     }
 
@@ -57,11 +57,11 @@ impl Hash for VertexConstraint {
 
 /// Edge constraint type.
 pub struct EdgeConstraint {
-    f: Box<dyn Fn(VId, VId) -> bool>,
+    f: Box<dyn Fn(VId, VId) -> bool + Send + Sync>,
 }
 
 impl EdgeConstraint {
-    pub fn new(f: Box<dyn Fn(VId, VId) -> bool>) -> Self {
+    pub fn new(f: Box<dyn Fn(VId, VId) -> bool + Send + Sync>) -> Self {
         Self { f }
     }
 
