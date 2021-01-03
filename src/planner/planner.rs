@@ -110,7 +110,7 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
             characteristic_ids.len(),
             &mut global_constraints,
         );
-        let join_plan = self.create_join_plan(&stars);
+        let join_plan = create_join_plan(self.pattern_graph, &stars, self.index_type);
         let global_constraint = if stars.is_empty() {
             None
         } else {
@@ -196,127 +196,6 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
             .collect()
     }
 
-    fn create_join_plan(&self, stars: &[StarInfo]) -> Option<JoinPlan> {
-        if stars.len() < 2 {
-            None
-        } else {
-            let mut uid_sr_eqvs: HashMap<VId, BTreeSet<(usize, usize)>> = HashMap::new();
-            for (star_id, star) in stars.iter().enumerate() {
-                for (&uid, &eqv) in star.vertex_eqv() {
-                    uid_sr_eqvs.entry(uid).or_default().insert((star_id, eqv));
-                }
-            }
-            let leaves = self.get_leaves(stars);
-            let vertex_eqv = self.create_vertex_eqv(stars, &leaves, &uid_sr_eqvs);
-            let eqv_pivots: BTreeMap<usize, VId> =
-                vertex_eqv.iter().map(|(&uid, &eqv)| (eqv, uid)).collect();
-            Some(JoinPlan::new(
-                vertex_eqv,
-                stars.len(),
-                self.index_type.clone(),
-                self.create_indexed_joins(stars, &uid_sr_eqvs),
-                eqv_pivots
-                    .iter()
-                    .skip(stars.len())
-                    .map(|(_, pivot)| {
-                        IntersectionPlan::new(
-                            uid_sr_eqvs.get(pivot).unwrap().iter().map(|&x| x).collect(),
-                        )
-                    })
-                    .collect(),
-            ))
-        }
-    }
-
-    fn get_leaves(&self, stars: &[StarInfo]) -> BTreeSet<VId> {
-        self.pattern_graph
-            .vertices()
-            .map(|(uid, _)| uid)
-            .collect::<BTreeSet<VId>>()
-            .difference(&stars.iter().map(|star| star.root()).collect())
-            .map(|&uid| uid)
-            .collect()
-    }
-
-    fn create_vertex_eqv(
-        &self,
-        stars: &[StarInfo],
-        leaves: &BTreeSet<VId>,
-        uid_sr_eqvs: &HashMap<VId, BTreeSet<(usize, usize)>>,
-    ) -> HashMap<VId, usize> {
-        let mut sr_eqvs_leaves: HashMap<&BTreeSet<(usize, usize)>, BTreeSet<VId>> =
-            HashMap::with_capacity(leaves.len());
-        leaves.iter().for_each(|&leaf| {
-            sr_eqvs_leaves
-                .entry(uid_sr_eqvs.get(&leaf).unwrap())
-                .or_default()
-                .insert(leaf);
-        });
-        let mut vertex_eqv: HashMap<VId, usize> = stars
-            .iter()
-            .enumerate()
-            .map(|(eqv, star)| (star.root(), eqv))
-            .collect();
-        let mut eqv = stars.len();
-        let mut visited = HashSet::new();
-        for leaf in leaves {
-            if !visited.contains(leaf) {
-                for &uid in sr_eqvs_leaves.get(uid_sr_eqvs.get(leaf).unwrap()).unwrap() {
-                    vertex_eqv.insert(uid, eqv);
-                    visited.insert(uid);
-                }
-                eqv += 1;
-            }
-        }
-        vertex_eqv
-    }
-
-    fn create_indexed_joins(
-        &self,
-        stars: &[StarInfo],
-        uid_sr_eqvs: &HashMap<VId, BTreeSet<(usize, usize)>>,
-    ) -> Vec<IndexedJoinPlan> {
-        stars
-            .iter()
-            .enumerate()
-            .skip(1)
-            .map(|(i, star)| {
-                let vc_offsets: HashMap<VId, usize> = stars
-                    .iter()
-                    .enumerate()
-                    .take(i)
-                    .map(|(sr, star)| (star.root(), sr))
-                    .collect();
-                IndexedJoinPlan::new(
-                    uid_sr_eqvs
-                        .get(&star.root())
-                        .unwrap()
-                        .iter()
-                        .filter_map(|&(sr, eqv)| if sr < i { Some((sr, eqv)) } else { None })
-                        .collect(),
-                    star.id(),
-                    star.vertex_eqv()
-                        .iter()
-                        .filter_map(|(&uid, &eqv)| {
-                            if uid != star.root() {
-                                Some((uid, eqv))
-                            } else {
-                                None
-                            }
-                        })
-                        .filter_map(|(uid, eqv)| {
-                            if let Some(&vc_offset) = vc_offsets.get(&uid) {
-                                Some((eqv, vc_offset))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                )
-            })
-            .collect()
-    }
-
     fn deprecated_create_join_plan(
         &self,
         stars: &[StarInfo],
@@ -362,6 +241,132 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
             join_infos
         }
     }
+}
+
+fn create_join_plan(
+    pattern_graph: &PatternGraph,
+    stars: &[StarInfo],
+    index_type: IndexType,
+) -> Option<JoinPlan> {
+    if stars.len() < 2 {
+        None
+    } else {
+        let mut uid_sr_eqvs: HashMap<VId, BTreeSet<(usize, usize)>> = HashMap::new();
+        for (star_id, star) in stars.iter().enumerate() {
+            for (&uid, &eqv) in star.vertex_eqv() {
+                uid_sr_eqvs.entry(uid).or_default().insert((star_id, eqv));
+            }
+        }
+        let leaves = get_leaves(pattern_graph, stars);
+        let vertex_eqv = create_vertex_eqv(stars, &leaves, &uid_sr_eqvs);
+        let eqv_pivots: BTreeMap<usize, VId> =
+            vertex_eqv.iter().map(|(&uid, &eqv)| (eqv, uid)).collect();
+        Some(JoinPlan::new(
+            vertex_eqv,
+            stars.len(),
+            index_type,
+            create_indexed_joins(stars, &uid_sr_eqvs),
+            eqv_pivots
+                .iter()
+                .skip(stars.len())
+                .map(|(_, pivot)| {
+                    IntersectionPlan::new(
+                        uid_sr_eqvs.get(pivot).unwrap().iter().map(|&x| x).collect(),
+                    )
+                })
+                .collect(),
+        ))
+    }
+}
+
+fn get_leaves(pattern_graph: &PatternGraph, stars: &[StarInfo]) -> BTreeSet<VId> {
+    pattern_graph
+        .vertices()
+        .map(|(uid, _)| uid)
+        .collect::<BTreeSet<VId>>()
+        .difference(&stars.iter().map(|star| star.root()).collect())
+        .map(|&uid| uid)
+        .collect()
+}
+
+fn create_vertex_eqv(
+    stars: &[StarInfo],
+    leaves: &BTreeSet<VId>,
+    uid_sr_eqvs: &HashMap<VId, BTreeSet<(usize, usize)>>,
+) -> HashMap<VId, usize> {
+    let mut sr_eqvs_leaves: HashMap<&BTreeSet<(usize, usize)>, BTreeSet<VId>> =
+        HashMap::with_capacity(leaves.len());
+    leaves.iter().for_each(|&leaf| {
+        sr_eqvs_leaves
+            .entry(uid_sr_eqvs.get(&leaf).unwrap())
+            .or_default()
+            .insert(leaf);
+    });
+    let mut vertex_eqv: HashMap<VId, usize> = stars
+        .iter()
+        .enumerate()
+        .map(|(eqv, star)| (star.root(), eqv))
+        .collect();
+    let mut eqv = stars.len();
+    let mut visited = HashSet::new();
+    for leaf in leaves {
+        if !visited.contains(leaf) {
+            for &uid in sr_eqvs_leaves.get(uid_sr_eqvs.get(leaf).unwrap()).unwrap() {
+                vertex_eqv.insert(uid, eqv);
+                visited.insert(uid);
+            }
+            eqv += 1;
+        }
+    }
+    vertex_eqv
+}
+
+fn create_indexed_joins(
+    stars: &[StarInfo],
+    uid_sr_eqvs: &HashMap<VId, BTreeSet<(usize, usize)>>,
+) -> Vec<IndexedJoinPlan> {
+    stars
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(i, star)| {
+            let vc_offsets: HashMap<VId, usize> = stars
+                .iter()
+                .enumerate()
+                .take(i)
+                .map(|(sr, star)| (star.root(), sr))
+                .collect();
+            let mut contains_checks: Vec<_> = star
+                .vertex_eqv()
+                .iter()
+                .filter_map(|(&uid, &eqv)| {
+                    if uid != star.root() {
+                        Some((uid, eqv))
+                    } else {
+                        None
+                    }
+                })
+                .filter_map(|(uid, eqv)| {
+                    if let Some(&vc_offset) = vc_offsets.get(&uid) {
+                        Some((eqv, vc_offset))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            contains_checks.sort();
+            IndexedJoinPlan::new(
+                uid_sr_eqvs
+                    .get(&star.root())
+                    .unwrap()
+                    .iter()
+                    .filter_map(|&(sr, eqv)| if sr < i { Some((sr, eqv)) } else { None })
+                    .collect(),
+                star.id(),
+                contains_checks,
+            )
+        })
+        .collect()
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -837,6 +842,7 @@ impl JoinInfo {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct IndexedJoinPlan {
     scan: Vec<(usize, usize)>, // (sr, eqv)
     index_id: usize,
@@ -869,6 +875,7 @@ impl IndexedJoinPlan {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct IntersectionPlan {
     intersection: Vec<(usize, usize)>, // (sr, eqv)
 }
@@ -1428,5 +1435,68 @@ mod tests {
         assert_eq!(join_info.sequential_intersections(), &[(2, 2, None)]);
         assert_eq!(join_info.left_keeps(), &[]);
         assert_eq!(join_info.right_keeps(), &[(2, None)]);
+    }
+
+    #[test]
+    fn test_q02_join() {
+        let mut p = PatternGraph::new();
+        for (vid, vlabel) in vec![(1, 0), (2, 0), (3, 0), (4, 0)] {
+            p.add_vertex(vid, vlabel);
+        }
+        for (src, dst, elabel) in vec![(1, 2, 0), (1, 3, 0), (2, 4, 0), (3, 4, 0)] {
+            p.add_arc(src, dst, elabel);
+        }
+        let stars = vec![
+            StarInfo::new(&p, 1, 0),
+            StarInfo::new(&p, 2, 1),
+            StarInfo::new(&p, 3, 1),
+        ];
+        let join_plan = create_join_plan(&p, &stars, IndexType::Hash).unwrap();
+        assert_eq!(
+            join_plan.indexed_joins(),
+            &[
+                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)]),
+                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)])
+            ]
+        );
+        assert_eq!(
+            join_plan.intersections(),
+            &[IntersectionPlan::new(vec![(1, 1), (2, 1)])]
+        );
+    }
+
+    #[test]
+    fn test_q06_join() {
+        let mut p = PatternGraph::new();
+        for (vid, vlabel) in vec![(1, 0), (2, 0), (3, 0), (4, 0)] {
+            p.add_vertex(vid, vlabel);
+        }
+        for (u1, u2, elabel) in vec![
+            (1, 2, 0),
+            (1, 3, 0),
+            (1, 4, 0),
+            (2, 3, 0),
+            (2, 4, 0),
+            (3, 4, 0),
+        ] {
+            p.add_arc(u1, u2, elabel);
+        }
+        let stars = vec![
+            StarInfo::new(&p, 1, 0),
+            StarInfo::new(&p, 2, 1),
+            StarInfo::new(&p, 3, 2),
+        ];
+        let join_plan = create_join_plan(&p, &stars, IndexType::Hash).unwrap();
+        assert_eq!(
+            join_plan.indexed_joins(),
+            vec![
+                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)]),
+                IndexedJoinPlan::new(vec![(0, 1), (1, 1)], 2, vec![(2, 0), (2, 1)])
+            ]
+        );
+        assert_eq!(
+            join_plan.intersections(),
+            vec![IntersectionPlan::new(vec![(0, 1), (1, 1), (2, 1)])]
+        );
     }
 }
