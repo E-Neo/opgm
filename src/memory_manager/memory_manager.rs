@@ -152,7 +152,7 @@ impl MemoryManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::{io::Write, mem::size_of};
 
     #[test]
     fn test_mem_len() {
@@ -222,6 +222,10 @@ mod tests {
         assert_eq!(mm.read_slice::<u8>(0, mm.len()), [10, 2, 3, 4, 5, 6]);
         mm.write(1, &20u8 as *const u8, 1);
         assert_eq!(mm.read_slice::<u8>(0, mm.len()), [10, 20, 3, 4, 5, 6]);
+        let mut mm = new_empty_mmap_mm();
+        mm.resize(size_of::<usize>());
+        mm.write(0, &1995usize as *const usize, 1);
+        assert_eq!(mm.read_slice::<usize>(0, 1), [1995]);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use clap::{
-    crate_authors, crate_description, crate_name, crate_version, App, AppSettings, Arg, ArgMatches,
-    SubCommand,
+    crate_authors, crate_description, crate_name, crate_version, App, AppSettings, Arg, ArgGroup,
+    ArgMatches, SubCommand,
 };
 use derive_more::Display;
 use opgm::{
@@ -8,7 +8,7 @@ use opgm::{
     data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
     executor::{SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
-    planner::{IndexType, MemoryManagerType, Task},
+    planner::{IndexType, MemoryManagerType, Plan, Task},
 };
 use rayon::prelude::*;
 use std::{
@@ -91,7 +91,7 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         .index_type(parse_index_type(matches.value_of("index-type").unwrap()))
         .plan();
     let (mut super_row_mms, mut index_mms) = plan.allocate();
-    let mut time_now = std::time::Instant::now();
+    let time_now = std::time::Instant::now();
     plan.execute_stars_plan(&mut super_row_mms, &mut index_mms);
     writeln!(
         &mut stderr,
@@ -99,41 +99,84 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         (std::time::Instant::now() - time_now).as_millis()
     )?;
     if matches.is_present("count-rows") {
-        time_now = std::time::Instant::now();
-        let num_rows = if plan.stars().is_empty() {
-            0
-        } else if let Some(srs) = plan.execute_join_plan(&super_row_mms, &index_mms) {
-            if let Some(gc) = plan.global_constraint() {
-                srs.par_bridge()
-                    .map(|sr| {
-                        sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                            .filter(|row| gc.f()(row))
-                            .count()
-                    })
-                    .sum()
-            } else {
-                srs.par_bridge()
-                    .map(|sr| {
-                        sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                            .count()
-                    })
-                    .sum()
-            }
-        } else {
-            todo!()
-        };
-        writeln!(
+        handle_match_count_rows(&mut stderr, &plan, &super_row_mms, &index_mms)?;
+    } else if matches.is_present("outfile") {
+        handle_match_outfile(
             &mut stderr,
-            "join_decompress_time: {}",
-            (std::time::Instant::now() - time_now).as_millis()
+            matches.value_of("directory").unwrap(),
+            matches.value_of("name").unwrap(),
+            &plan,
+            &super_row_mms,
+            &index_mms,
         )?;
-        writeln!(&mut stderr, "num_rows: {}", num_rows)?;
     }
     writeln!(
         &mut stderr,
         "total_time: {}",
         (std::time::Instant::now() - start_time).as_millis()
     )?;
+    Ok(())
+}
+
+fn handle_match_count_rows<W: Write>(
+    stderr: &mut W,
+    plan: &Plan,
+    super_row_mms: &[MemoryManager],
+    index_mms: &[MemoryManager],
+) -> std::io::Result<()> {
+    let time_now = std::time::Instant::now();
+    let num_rows = if plan.stars().is_empty() {
+        0
+    } else if let Some(srs) = plan.execute_join_plan(&super_row_mms, &index_mms) {
+        if let Some(gc) = plan.global_constraint() {
+            srs.par_bridge()
+                .map(|sr| {
+                    sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
+                        .filter(|row| gc.f()(row))
+                        .count()
+                })
+                .sum()
+        } else {
+            srs.par_bridge()
+                .map(|sr| {
+                    sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
+                        .count()
+                })
+                .sum()
+        }
+    } else {
+        todo!()
+    };
+    writeln!(
+        stderr,
+        "join_decompress_time: {}",
+        (std::time::Instant::now() - time_now).as_millis()
+    )?;
+    writeln!(stderr, "num_rows: {}", num_rows)?;
+    Ok(())
+}
+
+fn handle_match_outfile<W: Write>(
+    stderr: &mut W,
+    directory: &str,
+    name: &str,
+    plan: &Plan,
+    super_row_mms: &[MemoryManager],
+    index_mms: &[MemoryManager],
+) -> std::io::Result<()> {
+    if let Some(srs) = plan.execute_join_plan(super_row_mms, index_mms) {
+        let time_now = std::time::Instant::now();
+        srs.write(&mut MemoryManager::Mmap(MmapFile::new(
+            PathBuf::from(directory).join(format!("{}.sr", name)),
+        )));
+        writeln!(
+            stderr,
+            "join_time: {}",
+            (std::time::Instant::now() - time_now).as_millis()
+        )?;
+    } else {
+        writeln!(stderr, "warning: no_join")?;
+    }
     Ok(())
 }
 
@@ -225,8 +268,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Arg::with_name("count-rows")
                         .help("Counts rows of matching results")
                         .long("count-rows")
-                        .takes_value(false)
-                        .conflicts_with_all(&["to-stdout", "no-outfile"]),
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("outfile")
+                        .help("Path of the final SuperRow file")
+                        .long("outfile")
+                        .takes_value(false),
                 )
                 .arg(
                     Arg::with_name("db-in-memory")
@@ -280,7 +328,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .takes_value(true)
                         .default_value("sorted")
                         .possible_values(&["sorted", "hash"]),
-                ),
+                )
+                .group(ArgGroup::with_name("output").args(&["count-rows", "outfile"])),
         )
         .subcommand(
             SubCommand::with_name("plan")

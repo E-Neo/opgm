@@ -1,8 +1,11 @@
 use crate::{
-    executor::{read_super_row_header, SuperRow, SuperRows},
+    executor::{
+        read_super_row_header, write_num_bytes, write_pos_len, write_super_row_header, write_vid,
+        SuperRow, SuperRows,
+    },
     memory_manager::MemoryManager,
     planner::{IndexType, JoinPlan},
-    types::{VId, VIdPos},
+    types::{PosLen, SuperRowHeader, VId, VIdPos},
 };
 use itertools::{EitherOrBoth, Itertools};
 use std::{
@@ -12,14 +15,18 @@ use std::{
 
 struct Intersection<'a> {
     inner: Box<dyn Iterator<Item = &'a VId> + 'a + Send + Sync>,
+    bound: usize,
 }
 
 impl<'a> Intersection<'a> {
     fn new<I: IntoIterator<Item = &'a [VId]>>(images: I) -> Self {
         let mut tail = images.into_iter();
+        let x = tail.next().unwrap();
+        let mut bound = x.len();
         let mut inner: Box<dyn Iterator<Item = &'a VId> + 'a + Send + Sync> =
-            Box::new(tail.next().unwrap().into_iter());
+            Box::new(x.into_iter());
         for other in tail {
+            bound = std::cmp::min(bound, other.len());
             inner = Box::new(inner.merge_join_by(other, |x, y| x.cmp(y)).filter_map(|x| {
                 if let EitherOrBoth::Both(x, _) = x {
                     Some(x)
@@ -28,7 +35,11 @@ impl<'a> Intersection<'a> {
                 }
             }));
         }
-        Self { inner }
+        Self { inner, bound }
+    }
+
+    fn bound(&self) -> usize {
+        self.bound
     }
 }
 
@@ -107,6 +118,17 @@ impl<'a> JoinedSuperRow<'a> {
             vertex_cover,
             leaves,
         }
+    }
+
+    fn num_eqv(&self) -> usize {
+        self.vertex_cover.len() + self.leaves.len()
+    }
+
+    fn num_bytes_bound(&self) -> usize {
+        size_of::<usize>()
+            + size_of::<PosLen>() * self.num_eqv()
+            + size_of::<VId>()
+                * (self.vertex_cover.len() + self.leaves.iter().map(|x| x.bound()).sum::<usize>())
     }
 
     pub fn decompress(mut self, vertex_eqv: &[(VId, usize)]) -> JoinedSuperRowIter {
@@ -219,6 +241,70 @@ impl<'a, 'b> JoinedSuperRows<'a, 'b> {
             scans: Vec::with_capacity(plan.num_cover()),
         }
     }
+
+    fn num_eqvs(&self) -> usize {
+        self.num_cover() + self.plan.intersections().len()
+    }
+
+    fn num_cover(&self) -> usize {
+        self.plan.num_cover()
+    }
+
+    pub fn write(self, output: &mut MemoryManager) {
+        let num_eqvs = self.num_eqvs();
+        let num_cover = self.num_cover();
+        output.resize(size_of::<SuperRowHeader>());
+        let mut sr_pos = size_of::<SuperRowHeader>();
+        let mut num_rows = 0;
+        for sr in self {
+            let vc_set: HashSet<VId> = sr.vertex_cover.iter().map(|&vid| vid).collect();
+            if vc_set.len() == num_cover {
+                output.resize(sr_pos + sr.num_bytes_bound());
+                let mut pos = sr_pos + size_of::<usize>() + size_of::<PosLen>() * num_eqvs;
+                output.write(pos, sr.vertex_cover.as_ptr(), num_cover);
+                for eqv in 0..num_cover {
+                    write_pos_len(output, sr_pos, eqv, pos, 1);
+                    pos += size_of::<VId>();
+                }
+                let new_pos = write_leaves(output, num_cover, sr_pos, pos, sr.leaves);
+                if new_pos != pos {
+                    write_num_bytes(output, sr_pos, new_pos - sr_pos);
+                    sr_pos = new_pos;
+                    num_rows += 1;
+                }
+            }
+        }
+        write_super_row_header(output, num_rows, num_eqvs, num_cover);
+        output.resize(sr_pos);
+    }
+}
+
+fn write_leaves(
+    output: &mut MemoryManager,
+    num_cover: usize,
+    sr_pos: usize,
+    pos: usize,
+    leaves: Vec<Intersection>,
+) -> usize {
+    let mut new_pos = pos;
+    for (eqv, x) in (num_cover..).zip(leaves) {
+        let pos_start = new_pos;
+        for &vid in x {
+            write_vid(output, new_pos, vid);
+            new_pos += size_of::<VId>();
+        }
+        if new_pos == pos_start {
+            return pos;
+        }
+        write_pos_len(
+            output,
+            sr_pos,
+            eqv,
+            pos_start,
+            (new_pos - pos_start) / size_of::<VId>(),
+        );
+    }
+    new_pos
 }
 
 impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
@@ -304,6 +390,29 @@ mod tests {
         executor::{add_super_row_and_index_compact, empty_super_row_mm},
         planner::{IndexedJoinPlan, IntersectionPlan},
     };
+
+    #[test]
+    fn test_intersection() {
+        let images: Vec<&[VId]> = vec![&[1, 2, 3, 4, 5]];
+        assert_eq!(
+            Intersection::new(images).map(|&v| v).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5]
+        );
+        let images: Vec<&[VId]> = vec![&[1, 2, 3, 4, 5, 6, 7, 8, 9], &[0, 2, 4, 6, 8]];
+        assert_eq!(
+            Intersection::new(images).map(|&v| v).collect::<Vec<_>>(),
+            vec![2, 4, 6, 8]
+        );
+        let images: Vec<&[VId]> = vec![
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9],
+            &[2, 4, 6, 8, 10],
+            &[0, 2, 4, 8],
+        ];
+        assert_eq!(
+            Intersection::new(images).map(|&v| v).collect::<Vec<_>>(),
+            vec![2, 4, 8]
+        );
+    }
 
     #[test]
     fn test_joined_super_row_iter() {
