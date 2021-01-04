@@ -114,6 +114,10 @@ impl<'a> SuperRows<'a> {
             sr_pos: size_of::<SuperRowHeader>(),
         }
     }
+
+    pub fn num_rows(&self) -> usize {
+        self.num_rows
+    }
 }
 
 impl<'a> Iterator for SuperRows<'a> {

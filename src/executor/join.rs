@@ -250,7 +250,7 @@ impl<'a, 'b> JoinedSuperRows<'a, 'b> {
         self.plan.num_cover()
     }
 
-    pub fn write(self, output: &mut MemoryManager) {
+    pub fn write(self, output: &mut MemoryManager) -> usize {
         let num_eqvs = self.num_eqvs();
         let num_cover = self.num_cover();
         output.resize(size_of::<SuperRowHeader>());
@@ -276,6 +276,7 @@ impl<'a, 'b> JoinedSuperRows<'a, 'b> {
         }
         write_super_row_header(output, num_rows, num_eqvs, num_cover);
         output.resize(sr_pos);
+        num_rows
     }
 }
 
