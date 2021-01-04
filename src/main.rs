@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use std::{
     error::Error,
     fs::File,
-    io::{BufWriter, Read, Write},
+    io::{Read, Write},
     path::PathBuf,
 };
 
@@ -62,7 +62,7 @@ fn handle_displaysr(matches: &ArgMatches) -> std::io::Result<()> {
 }
 
 fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
-    let mut stderr = BufWriter::new(std::io::stderr());
+    let mut stderr = std::io::stderr();
     let start_time = std::time::Instant::now();
     let mut file = File::open(matches.value_of("DATAGRAPH").unwrap())?;
     let data_graph = DataGraph::new(if matches.is_present("db-in-memory") {

@@ -368,6 +368,7 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
                     }
                 } else {
                     self.vc.pop();
+                    self.srs.pop();
                     self.scans.pop();
                 }
             }
@@ -459,20 +460,9 @@ mod tests {
             ],
             vec![IntersectionPlan::new(vec![(1, 1), (2, 1)])],
         );
-        let mut eqv_vertices: Vec<(usize, VId)> = plan
-            .vertex_eqv()
-            .iter()
-            .map(|(&uid, &eqv)| (eqv, uid))
-            .collect();
-        eqv_vertices.sort();
         assert_eq!(
             join(&super_row_mms, &index_mms, &plan)
-                .flat_map(|sr| sr.decompress(
-                    &eqv_vertices
-                        .iter()
-                        .map(|&(eqv, uid)| (uid, eqv))
-                        .collect::<Vec<_>>()
-                ))
+                .flat_map(|sr| sr.decompress(plan.sorted_vertex_eqv()))
                 .collect::<Vec<_>>(),
             vec![
                 vec![1, 2, 3, 5],
