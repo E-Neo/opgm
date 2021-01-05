@@ -273,31 +273,6 @@ fn create_indexed_joins(
         .enumerate()
         .skip(1)
         .map(|(i, star)| {
-            let vc_offsets: HashMap<VId, usize> = stars
-                .iter()
-                .enumerate()
-                .take(i)
-                .map(|(sr, star)| (star.root(), sr))
-                .collect();
-            let mut contains_checks: Vec<_> = star
-                .vertex_eqv()
-                .iter()
-                .filter_map(|(&uid, &eqv)| {
-                    if uid != star.root() {
-                        Some((uid, eqv))
-                    } else {
-                        None
-                    }
-                })
-                .filter_map(|(uid, eqv)| {
-                    if let Some(&vc_offset) = vc_offsets.get(&uid) {
-                        Some((eqv, vc_offset))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            contains_checks.sort();
             IndexedJoinPlan::new(
                 uid_sr_eqvs
                     .get(&star.root())
@@ -306,7 +281,6 @@ fn create_indexed_joins(
                     .filter_map(|&(sr, eqv)| if sr < i { Some((sr, eqv)) } else { None })
                     .collect(),
                 star.id(),
-                contains_checks,
             )
         })
         .collect()
@@ -412,20 +386,11 @@ impl<'a, 'b> StarInfo<'a, 'b> {
 pub struct IndexedJoinPlan {
     scan: Vec<(usize, usize)>, // (sr, eqv)
     index_id: usize,
-    contains_checks: Vec<(usize, usize)>, // (eqv, vc_offset)
 }
 
 impl IndexedJoinPlan {
-    pub fn new(
-        scan: Vec<(usize, usize)>,
-        index_id: usize,
-        contains_checks: Vec<(usize, usize)>,
-    ) -> Self {
-        Self {
-            scan,
-            index_id,
-            contains_checks,
-        }
+    pub fn new(scan: Vec<(usize, usize)>, index_id: usize) -> Self {
+        Self { scan, index_id }
     }
 
     pub fn scan(&self) -> &[(usize, usize)] {
@@ -434,10 +399,6 @@ impl IndexedJoinPlan {
 
     pub fn index_id(&self) -> usize {
         self.index_id
-    }
-
-    pub fn contains_checks(&self) -> &[(usize, usize)] {
-        &self.contains_checks
     }
 }
 
@@ -859,8 +820,8 @@ mod tests {
         assert_eq!(
             join_plan.indexed_joins(),
             &[
-                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)]),
-                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)])
+                IndexedJoinPlan::new(vec![(0, 1)], 1),
+                IndexedJoinPlan::new(vec![(0, 1)], 1)
             ]
         );
         assert_eq!(
@@ -894,8 +855,8 @@ mod tests {
         assert_eq!(
             join_plan.indexed_joins(),
             vec![
-                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)]),
-                IndexedJoinPlan::new(vec![(0, 1), (1, 1)], 2, vec![(2, 0), (2, 1)])
+                IndexedJoinPlan::new(vec![(0, 1)], 1),
+                IndexedJoinPlan::new(vec![(0, 1), (1, 1)], 2)
             ]
         );
         assert_eq!(

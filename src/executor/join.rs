@@ -327,51 +327,42 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
                 } else {
                     return None;
                 }
-            } else if self.vc.len() == self.plan.num_cover() {
-                let emit = JoinedSuperRow::new(
-                    self.vc.clone(),
-                    self.plan
-                        .intersections()
-                        .iter()
-                        .map(|x| {
-                            Intersection::new(
-                                x.intersection()
-                                    .iter()
-                                    .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
-                            )
-                        })
-                        .collect(),
-                );
+            } else if let Some(&v1) = self.scans.last_mut().and_then(|x| x.next()) {
+                let indexed_join = &self.plan.indexed_joins()[self.vc.len() - 1];
+                if let Some(sr1) = self.indices[indexed_join.index_id()].get(v1) {
+                    self.srs.push(sr1);
+                    self.vc.push(v1);
+                    if self.vc.len() == self.plan.num_cover() {
+                        let emit = JoinedSuperRow::new(
+                            self.vc.clone(),
+                            self.plan
+                                .intersections()
+                                .iter()
+                                .map(|x| {
+                                    Intersection::new(
+                                        x.intersection()
+                                            .iter()
+                                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
+                                    )
+                                })
+                                .collect(),
+                        );
+                        self.vc.pop();
+                        self.srs.pop();
+                        return Some(emit);
+                    } else {
+                        self.scans.push(Intersection::new(
+                            self.plan.indexed_joins()[self.vc.len() - 1]
+                                .scan()
+                                .iter()
+                                .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
+                        ));
+                    }
+                }
+            } else {
                 self.vc.pop();
                 self.srs.pop();
                 self.scans.pop();
-                return Some(emit);
-            } else {
-                if let Some(&v1) = self.scans.last_mut().and_then(|x| x.next()) {
-                    let indexed_join = &self.plan.indexed_joins()[self.vc.len() - 1];
-                    if let Some(sr1) = self.indices[indexed_join.index_id()].get(v1) {
-                        if indexed_join
-                            .contains_checks()
-                            .iter()
-                            .all(|&(eqv, vc_offset)| {
-                                sr1.images()[eqv].binary_search(&self.vc[vc_offset]).is_ok()
-                            })
-                        {
-                            self.srs.push(sr1);
-                            self.vc.push(v1);
-                            self.scans.push(Intersection::new(
-                                indexed_join
-                                    .scan()
-                                    .iter()
-                                    .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
-                            ));
-                        }
-                    }
-                } else {
-                    self.vc.pop();
-                    self.srs.pop();
-                    self.scans.pop();
-                }
             }
         }
     }
@@ -456,8 +447,8 @@ mod tests {
             3,
             IndexType::Hash,
             vec![
-                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)]),
-                IndexedJoinPlan::new(vec![(0, 1)], 1, vec![(2, 0)]),
+                IndexedJoinPlan::new(vec![(0, 1)], 1),
+                IndexedJoinPlan::new(vec![(0, 1)], 1),
             ],
             vec![IntersectionPlan::new(vec![(1, 1), (2, 1)])],
         );
