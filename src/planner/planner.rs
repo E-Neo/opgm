@@ -311,7 +311,7 @@ impl<'a, 'b> CharacteristicInfo<'a, 'b> {
 
 // private methods.
 impl<'a, 'b> CharacteristicInfo<'a, 'b> {
-    pub(crate) fn new(characteristic: Characteristic<'a, 'b>, id: usize) -> Self {
+    pub fn new(characteristic: Characteristic<'a, 'b>, id: usize) -> Self {
         let mut nlabel_ninfo_num_eqvs: BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize, usize)>> =
             BTreeMap::new();
         characteristic

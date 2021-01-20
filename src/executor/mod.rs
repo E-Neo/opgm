@@ -1,7 +1,7 @@
 //! The executor.
 
 pub use decompress::{decompress, write_results};
-pub use join::{join, JoinedSuperRow, JoinedSuperRowIter, JoinedSuperRows};
+pub use join::{join, Index, Intersection, JoinedSuperRow, JoinedSuperRowIter, JoinedSuperRows};
 pub use match_characteristics::match_characteristics;
 pub use super_row::{
     add_super_row, add_super_row_and_index, add_super_row_and_index_compact, empty_super_row_mm,

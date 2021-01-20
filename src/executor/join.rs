@@ -13,13 +13,13 @@ use std::{
     mem::size_of,
 };
 
-struct Intersection<'a> {
+pub struct Intersection<'a> {
     inner: Box<dyn Iterator<Item = &'a VId> + 'a + Send + Sync>,
     bound: usize,
 }
 
 impl<'a> Intersection<'a> {
-    fn new<I: IntoIterator<Item = &'a [VId]>>(images: I) -> Self {
+    pub fn new<I: IntoIterator<Item = &'a [VId]>>(images: I) -> Self {
         let mut tail = images.into_iter();
         let x = tail.next().unwrap();
         let mut bound = x.len();
@@ -80,14 +80,14 @@ impl<'a> IndexInner<'a> {
     }
 }
 
-struct Index<'a> {
+pub struct Index<'a> {
     super_row_mm: &'a MemoryManager,
     num_eqvs: usize,
     inner: IndexInner<'a>,
 }
 
 impl<'a> Index<'a> {
-    fn new(
+    pub fn new(
         super_row_mm: &'a MemoryManager,
         index_mm: &'a MemoryManager,
         index_type: &IndexType,
@@ -100,7 +100,7 @@ impl<'a> Index<'a> {
         }
     }
 
-    fn get(&self, vid: VId) -> Option<SuperRow<'a>> {
+    pub fn get(&self, vid: VId) -> Option<SuperRow<'a>> {
         self.inner
             .get(vid)
             .map(|sr_pos| SuperRow::new(self.super_row_mm, sr_pos, self.num_eqvs))
