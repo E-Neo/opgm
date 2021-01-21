@@ -7,39 +7,26 @@ use crate::{
     planner::{IndexType, JoinPlan},
     types::{PosLen, SuperRowHeader, VId, VIdPos},
 };
-use itertools::{EitherOrBoth, Itertools};
 use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
 };
 
 pub struct Intersection<'a> {
-    inner: Box<dyn Iterator<Item = &'a VId> + 'a + Send + Sync>,
-    bound: usize,
+    images: Vec<&'a [VId]>,
+    offsets: Vec<usize>,
 }
 
 impl<'a> Intersection<'a> {
     pub fn new(images: Vec<&'a [VId]>) -> Self {
-        let mut tail = images.into_iter();
-        let x = tail.next().unwrap();
-        let mut bound = x.len();
-        let mut inner: Box<dyn Iterator<Item = &'a VId> + 'a + Send + Sync> =
-            Box::new(x.into_iter());
-        for other in tail {
-            bound = std::cmp::min(bound, other.len());
-            inner = Box::new(inner.merge_join_by(other, |x, y| x.cmp(y)).filter_map(|x| {
-                if let EitherOrBoth::Both(x, _) = x {
-                    Some(x)
-                } else {
-                    None
-                }
-            }));
+        Self {
+            offsets: vec![0; images.len()],
+            images,
         }
-        Self { inner, bound }
     }
 
     fn bound(&self) -> usize {
-        self.bound
+        self.images.iter().map(|img| img.len()).min().unwrap()
     }
 }
 
@@ -47,7 +34,30 @@ impl<'a> Iterator for Intersection<'a> {
     type Item = VId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|&x| x)
+        while self.offsets[0] < self.images[0].len() {
+            let x = self.images[0][self.offsets[0]];
+            self.offsets[0] += 1;
+            let mut emit = true;
+            for depth in 1..self.images.len() {
+                let image = self.images[depth];
+                let offset = &mut self.offsets[depth];
+                while *offset < image.len() && x > image[*offset] {
+                    *offset += 1;
+                }
+                if *offset == image.len() {
+                    return None;
+                } else if x < image[*offset] {
+                    emit = false;
+                    break;
+                } else {
+                    *offset += 1;
+                }
+            }
+            if emit {
+                return Some(x);
+            }
+        }
+        None
     }
 }
 
