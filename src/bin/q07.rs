@@ -89,10 +89,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         for &u2 in sr0.images()[1] {
             if row_set.insert(u2) {
                 if let Some(sr1) = indices[1].get(u2) {
-                    for &u3 in Intersection::new(vec![sr0.images()[1], sr1.images()[1]]) {
+                    for u3 in Intersection::new(vec![sr0.images()[1], sr1.images()[1]]) {
                         if row_set.insert(u3) {
                             if let Some(sr2) = indices[2].get(u3) {
-                                for &u4 in Intersection::new(vec![
+                                for u4 in Intersection::new(vec![
                                     sr0.images()[1],
                                     sr1.images()[1],
                                     sr2.images()[1],
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     if let Some(sr3) = indices[3].get(u4) {
                                         if row_set.insert(u4) {
                                             num_srs += 1;
-                                            for &u5 in Intersection::new(vec![
+                                            for u5 in Intersection::new(vec![
                                                 sr0.images()[1],
                                                 sr1.images()[1],
                                                 sr2.images()[1],

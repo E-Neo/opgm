@@ -19,7 +19,7 @@ pub struct Intersection<'a> {
 }
 
 impl<'a> Intersection<'a> {
-    pub fn new<I: IntoIterator<Item = &'a [VId]>>(images: I) -> Self {
+    pub fn new(images: Vec<&'a [VId]>) -> Self {
         let mut tail = images.into_iter();
         let x = tail.next().unwrap();
         let mut bound = x.len();
@@ -44,10 +44,10 @@ impl<'a> Intersection<'a> {
 }
 
 impl<'a> Iterator for Intersection<'a> {
-    type Item = &'a VId;
+    type Item = VId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
+        self.inner.next().map(|&x| x)
     }
 }
 
@@ -144,10 +144,7 @@ impl<'a> JoinedSuperRow<'a> {
             .collect();
         JoinedSuperRowIter::new(
             self.vertex_cover,
-            self.leaves
-                .iter_mut()
-                .map(|x| x.map(|&vid| vid).collect())
-                .collect(),
+            self.leaves.iter_mut().map(|x| x.collect()).collect(),
             leaf_mappings,
         )
     }
@@ -290,7 +287,7 @@ fn write_leaves(
     let mut new_pos = pos;
     for (eqv, x) in (num_cover..).zip(leaves) {
         let pos_start = new_pos;
-        for &vid in x {
+        for vid in x {
             write_vid(output, new_pos, vid);
             new_pos += size_of::<VId>();
         }
@@ -322,12 +319,13 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
                         self.plan.indexed_joins()[0]
                             .scan()
                             .iter()
-                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
+                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv])
+                            .collect(),
                     ));
                 } else {
                     return None;
                 }
-            } else if let Some(&v1) = self.scans.last_mut().and_then(|x| x.next()) {
+            } else if let Some(v1) = self.scans.last_mut().and_then(|x| x.next()) {
                 let indexed_join = &self.plan.indexed_joins()[self.vc.len() - 1];
                 if let Some(sr1) = self.indices[indexed_join.index_id()].get(v1) {
                     self.srs.push(sr1);
@@ -342,7 +340,8 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
                                     Intersection::new(
                                         x.intersection()
                                             .iter()
-                                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
+                                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv])
+                                            .collect(),
                                     )
                                 })
                                 .collect(),
@@ -355,7 +354,8 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
                             self.plan.indexed_joins()[self.vc.len() - 1]
                                 .scan()
                                 .iter()
-                                .map(|&(sr, eqv)| self.srs[sr].images()[eqv]),
+                                .map(|&(sr, eqv)| self.srs[sr].images()[eqv])
+                                .collect(),
                         ));
                     }
                 }
@@ -388,12 +388,12 @@ mod tests {
     fn test_intersection() {
         let images: Vec<&[VId]> = vec![&[1, 2, 3, 4, 5]];
         assert_eq!(
-            Intersection::new(images).map(|&v| v).collect::<Vec<_>>(),
+            Intersection::new(images).collect::<Vec<_>>(),
             vec![1, 2, 3, 4, 5]
         );
         let images: Vec<&[VId]> = vec![&[1, 2, 3, 4, 5, 6, 7, 8, 9], &[0, 2, 4, 6, 8]];
         assert_eq!(
-            Intersection::new(images).map(|&v| v).collect::<Vec<_>>(),
+            Intersection::new(images).collect::<Vec<_>>(),
             vec![2, 4, 6, 8]
         );
         let images: Vec<&[VId]> = vec![
@@ -401,10 +401,7 @@ mod tests {
             &[2, 4, 6, 8, 10],
             &[0, 2, 4, 8],
         ];
-        assert_eq!(
-            Intersection::new(images).map(|&v| v).collect::<Vec<_>>(),
-            vec![2, 4, 8]
-        );
+        assert_eq!(Intersection::new(images).collect::<Vec<_>>(), vec![2, 4, 8]);
     }
 
     #[test]
