@@ -123,7 +123,7 @@ pub struct JoinedSuperRow<'a> {
 }
 
 impl<'a> JoinedSuperRow<'a> {
-    fn new(vertex_cover: Vec<VId>, leaves: Vec<Intersection<'a>>) -> Self {
+    pub fn new(vertex_cover: Vec<VId>, leaves: Vec<Intersection<'a>>) -> Self {
         Self {
             vertex_cover,
             leaves,

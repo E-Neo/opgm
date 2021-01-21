@@ -6,6 +6,7 @@ use opgm::{
     pattern_graph::{Characteristic, PatternGraph},
     planner::{CharacteristicInfo, IndexType},
 };
+use rayon::prelude::*;
 use std::{collections::HashSet, error::Error, fs::File};
 
 fn create_pattern<'a>() -> PatternGraph<'a> {
@@ -80,56 +81,57 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let time_now = std::time::Instant::now();
     let indices = create_indices(&super_row_mms, &index_mms);
-    let mut num_srs: usize = 0;
-    let mut num_rows: usize = 0;
-    let mut row_set = HashSet::with_capacity(4);
-    for sr0 in SuperRows::new(&super_row_mms[0]) {
-        let u1 = sr0.images()[0][0];
-        row_set.insert(u1);
-        for &u2 in sr0.images()[1] {
-            if row_set.insert(u2) {
-                if let Some(sr1) = indices[1].get(u2) {
-                    for u3 in Intersection::new(vec![sr0.images()[1], sr1.images()[1]]) {
-                        if row_set.insert(u3) {
-                            if let Some(sr2) = indices[2].get(u3) {
-                                for u4 in Intersection::new(vec![
-                                    sr0.images()[1],
-                                    sr1.images()[1],
-                                    sr2.images()[1],
-                                ]) {
-                                    if let Some(sr3) = indices[3].get(u4) {
-                                        if row_set.insert(u4) {
-                                            num_srs += 1;
-                                            for u5 in Intersection::new(vec![
-                                                sr0.images()[1],
-                                                sr1.images()[1],
-                                                sr2.images()[1],
-                                                sr3.images()[1],
-                                            ]) {
-                                                if row_set.insert(u5) {
-                                                    num_rows += 1;
-                                                    row_set.remove(&u5);
+    let num_rows: usize = SuperRows::new(&super_row_mms[0])
+        .par_bridge()
+        .map(|sr0| {
+            let mut num_rows: usize = 0;
+            let mut row_set = HashSet::with_capacity(4);
+            let u1 = sr0.images()[0][0];
+            row_set.insert(u1);
+            for &u2 in sr0.images()[1] {
+                if row_set.insert(u2) {
+                    if let Some(sr1) = indices[1].get(u2) {
+                        for u3 in Intersection::new(vec![sr0.images()[1], sr1.images()[1]]) {
+                            if row_set.insert(u3) {
+                                if let Some(sr2) = indices[2].get(u3) {
+                                    for u4 in Intersection::new(vec![
+                                        sr0.images()[1],
+                                        sr1.images()[1],
+                                        sr2.images()[1],
+                                    ]) {
+                                        if let Some(sr3) = indices[3].get(u4) {
+                                            if row_set.insert(u4) {
+                                                for u5 in Intersection::new(vec![
+                                                    sr0.images()[1],
+                                                    sr1.images()[1],
+                                                    sr2.images()[1],
+                                                    sr3.images()[1],
+                                                ]) {
+                                                    if row_set.insert(u5) {
+                                                        num_rows += 1;
+                                                        row_set.remove(&u5);
+                                                    }
                                                 }
+                                                row_set.remove(&u4);
                                             }
-                                            row_set.remove(&u4);
                                         }
                                     }
                                 }
+                                row_set.remove(&u3);
                             }
-                            row_set.remove(&u3);
                         }
                     }
+                    row_set.remove(&u2);
                 }
-                row_set.remove(&u2);
             }
-        }
-        row_set.remove(&u1);
-    }
+            row_set.remove(&u1);
+            num_rows
+        })
+        .sum();
     eprintln!(
         "join_time: {}",
         (std::time::Instant::now() - time_now).as_millis()
     );
-    eprintln!("num_srs: {}", num_srs);
     eprintln!("num_rows: {}", num_rows);
     eprintln!(
         "total_time: {}",

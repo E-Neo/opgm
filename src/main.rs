@@ -6,17 +6,11 @@ use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
     data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
-    executor::{SuperRows, SuperRowsInfo},
+    executor::{count_rows, SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
     planner::{IndexType, MemoryManagerType, Plan, Task},
 };
-use rayon::prelude::*;
-use std::{
-    error::Error,
-    fs::File,
-    io::{Read, Write},
-    path::PathBuf,
-};
+use std::{error::Error, fs::File, io::Read, path::PathBuf};
 
 #[derive(Debug, Display, PartialEq)]
 enum Err {
@@ -62,7 +56,6 @@ fn handle_displaysr(matches: &ArgMatches) -> std::io::Result<()> {
 }
 
 fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
-    let mut stderr = std::io::stderr();
     let start_time = std::time::Instant::now();
     let mut file = File::open(matches.value_of("DATAGRAPH").unwrap())?;
     let data_graph = DataGraph::new(if matches.is_present("db-in-memory") {
@@ -93,32 +86,29 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     let (mut super_row_mms, mut index_mms) = plan.allocate();
     let time_now = std::time::Instant::now();
     plan.execute_stars_plan(&mut super_row_mms, &mut index_mms);
-    writeln!(
-        &mut stderr,
+    eprintln!(
         "stars_time: {}",
         (std::time::Instant::now() - time_now).as_millis()
-    )?;
+    );
     if matches.is_present("count-srs") {
-        handle_match_count_srs(&mut stderr, &plan, &super_row_mms, &index_mms)?;
+        handle_match_count_srs(&plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("count-rows") {
         if matches.is_present("parallel") {
-            handle_match_count_rows_parallel(&mut stderr, &plan, &super_row_mms, &index_mms)?;
+            handle_match_count_rows_parallel(&plan, &super_row_mms, &index_mms)?;
         } else {
-            handle_match_count_rows(&mut stderr, &plan, &super_row_mms, &index_mms)?;
+            handle_match_count_rows(&plan, &super_row_mms, &index_mms)?;
         }
     } else if matches.is_present("outfile") {
-        handle_match_outfile(&mut stderr, matches, &plan, &super_row_mms, &index_mms)?;
+        handle_match_outfile(matches, &plan, &super_row_mms, &index_mms)?;
     }
-    writeln!(
-        &mut stderr,
+    eprintln!(
         "total_time: {}",
         (std::time::Instant::now() - start_time).as_millis()
-    )?;
+    );
     Ok(())
 }
 
-fn handle_match_count_srs<W: Write>(
-    stderr: &mut W,
+fn handle_match_count_srs(
     plan: &Plan,
     super_row_mms: &[MemoryManager],
     index_mms: &[MemoryManager],
@@ -128,28 +118,26 @@ fn handle_match_count_srs<W: Write>(
     } else if let Some(srs) = plan.execute_join_plan(&super_row_mms, &index_mms) {
         let time_now = std::time::Instant::now();
         let num_rows = srs.count();
-        writeln!(
-            stderr,
+        eprintln!(
             "join_time: {}",
             (std::time::Instant::now() - time_now).as_millis()
-        )?;
+        );
         num_rows
     } else {
         SuperRows::new(super_row_mms.last().unwrap()).num_rows()
     };
-    writeln!(stderr, "num_srs: {}", num_srs)?;
+    eprintln!("num_srs: {}", num_srs);
     Ok(())
 }
 
-fn handle_match_count_rows<W: Write>(
-    stderr: &mut W,
+fn handle_match_count_rows(
     plan: &Plan,
     super_row_mms: &[MemoryManager],
     index_mms: &[MemoryManager],
 ) -> std::io::Result<()> {
     let time_now = std::time::Instant::now();
     if plan.stars().is_empty() {
-        writeln!(stderr, "num_rows: 0")?;
+        eprintln!("num_rows: 0");
     } else if let Some(srs) = plan.execute_join_plan(&super_row_mms, &index_mms) {
         let num_rows: usize = if let Some(gc) = plan.global_constraint() {
             srs.map(|sr| {
@@ -165,12 +153,11 @@ fn handle_match_count_rows<W: Write>(
             })
             .sum()
         };
-        writeln!(
-            stderr,
+        eprintln!(
             "join_decompress_time: {}",
             (std::time::Instant::now() - time_now).as_millis()
-        )?;
-        writeln!(stderr, "num_rows: {}", num_rows)?;
+        );
+        eprintln!("num_rows: {}", num_rows);
     } else {
         let srs = SuperRows::new(super_row_mms.last().unwrap());
         let num_rows: usize = if let Some(gc) = plan.global_constraint() {
@@ -187,78 +174,31 @@ fn handle_match_count_rows<W: Write>(
             })
             .sum()
         };
-        writeln!(
-            stderr,
+        eprintln!(
             "decompress_time: {}",
             (std::time::Instant::now() - time_now).as_millis()
-        )?;
-        writeln!(stderr, "num_rows: {}", num_rows)?;
+        );
+        eprintln!("num_rows: {}", num_rows);
     };
     Ok(())
 }
 
-fn handle_match_count_rows_parallel<W: Write>(
-    stderr: &mut W,
+fn handle_match_count_rows_parallel(
     plan: &Plan,
     super_row_mms: &[MemoryManager],
     index_mms: &[MemoryManager],
 ) -> std::io::Result<()> {
     let time_now = std::time::Instant::now();
-    if plan.stars().is_empty() {
-        writeln!(stderr, "num_rows: 0")?;
-    } else if let Some(srs) = plan.execute_join_plan(&super_row_mms, &index_mms) {
-        let num_rows: usize = if let Some(gc) = plan.global_constraint() {
-            srs.par_bridge()
-                .map(|sr| {
-                    sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                        .filter(|row| gc.f()(row))
-                        .count()
-                })
-                .sum()
-        } else {
-            srs.par_bridge()
-                .map(|sr| {
-                    sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                        .count()
-                })
-                .sum()
-        };
-        writeln!(
-            stderr,
-            "join_decompress_time: {}",
-            (std::time::Instant::now() - time_now).as_millis()
-        )?;
-        writeln!(stderr, "num_rows: {}", num_rows)?;
-    } else {
-        let srs = SuperRows::new(super_row_mms.last().unwrap());
-        let num_rows: usize = if let Some(gc) = plan.global_constraint() {
-            srs.par_bridge()
-                .map(|sr| {
-                    sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                        .filter(|row| gc.f()(row))
-                        .count()
-                })
-                .sum()
-        } else {
-            srs.par_bridge()
-                .map(|sr| {
-                    sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                        .count()
-                })
-                .sum()
-        };
-        writeln!(
-            stderr,
-            "decompress_time: {}",
-            (std::time::Instant::now() - time_now).as_millis()
-        )?;
-        writeln!(stderr, "num_rows: {}", num_rows)?;
-    };
+    let num_rows = count_rows(super_row_mms, index_mms, plan);
+    eprintln!(
+        "join_decompress_time: {}",
+        (std::time::Instant::now() - time_now).as_millis()
+    );
+    eprintln!("num_rows: {}", num_rows);
     Ok(())
 }
 
-fn handle_match_outfile<W: Write>(
-    stderr: &mut W,
+fn handle_match_outfile(
     matches: &ArgMatches,
     plan: &Plan,
     super_row_mms: &[MemoryManager],
@@ -278,14 +218,13 @@ fn handle_match_outfile<W: Write>(
             MemoryManagerType::Sink => MemoryManager::Sink,
         };
         let num_srs = srs.write(&mut mm);
-        writeln!(
-            stderr,
+        eprintln!(
             "join_time: {}",
             (std::time::Instant::now() - time_now).as_millis()
-        )?;
-        writeln!(stderr, "num_srs: {}", num_srs)?;
+        );
+        eprintln!("num_srs: {}", num_srs);
     } else {
-        writeln!(stderr, "warning: no_join")?;
+        eprintln!("warning: no_join");
     }
     Ok(())
 }
