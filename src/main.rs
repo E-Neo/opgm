@@ -99,8 +99,6 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         handle_match_count_srs(&plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("count-rows") {
         handle_match_count_rows(&plan, &super_row_mms, &index_mms)?;
-    } else if matches.is_present("outfile") {
-        handle_match_outfile(matches, &plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("to-stdout") {
         handle_match_to_stdout(&plan, &super_row_mms, &index_mms)?;
     }
@@ -145,37 +143,6 @@ fn handle_match_count_rows(
         (std::time::Instant::now() - time_now).as_millis()
     );
     eprintln!("num_rows: {}", num_rows);
-    Ok(())
-}
-
-fn handle_match_outfile(
-    matches: &ArgMatches,
-    plan: &Plan,
-    super_row_mms: &[MemoryManager],
-    index_mms: &[MemoryManager],
-) -> std::io::Result<()> {
-    if let Some(srs) = plan.execute_join_plan(super_row_mms, index_mms) {
-        let time_now = std::time::Instant::now();
-        let mut mm = match parse_mm_type(
-            matches.value_of("outfile").unwrap(),
-            matches.value_of("directory"),
-            matches.value_of("name"),
-        ) {
-            MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
-            MemoryManagerType::Mmap(directory, name) => {
-                MemoryManager::Mmap(MmapFile::new(directory.join(format!("{}.sr", name))))
-            }
-            MemoryManagerType::Sink => MemoryManager::Sink,
-        };
-        let num_srs = srs.write(&mut mm);
-        eprintln!(
-            "join_time: {}",
-            (std::time::Instant::now() - time_now).as_millis()
-        );
-        eprintln!("num_srs: {}", num_srs);
-    } else {
-        eprintln!("warning: no_join");
-    }
     Ok(())
 }
 
@@ -301,12 +268,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .takes_value(false),
                 )
                 .arg(
-                    Arg::with_name("outfile")
-                        .long("outfile")
-                        .takes_value(true)
-                        .possible_values(&["mem", "mmap", "sink"]),
-                )
-                .arg(
                     Arg::with_name("db-in-memory")
                         .help("Loads the data graph database into memory before matching")
                         .long("db-in-memory")
@@ -362,7 +323,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .group(ArgGroup::with_name("output").args(&[
                     "count-srs",
                     "count-rows",
-                    "outfile",
                     "to-stdout",
                 ])),
         )
