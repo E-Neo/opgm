@@ -1,109 +1,10 @@
 use crate::{
-    executor::{Index, Intersection, JoinedSuperRow, SuperRow, SuperRows},
+    executor::{create_indices, OneJoin, SuperRows},
     memory_manager::MemoryManager,
-    planner::{IndexType, IndexedJoinPlan, IntersectionPlan, JoinPlan, Plan},
+    planner::{JoinPlan, Plan},
     types::VId,
 };
 use rayon::prelude::*;
-
-struct OneJoin<'a, 'b> {
-    num_cover: usize,
-    vc: Vec<VId>,
-    srs: Vec<SuperRow<'a>>,
-    scans: Vec<Intersection<'a>>,
-    indices: Vec<&'a Index<'a>>,
-    indexed_joins: &'b [IndexedJoinPlan],
-    intersections: &'b [IntersectionPlan],
-}
-
-impl<'a, 'b> OneJoin<'a, 'b> {
-    fn new(sr0: SuperRow<'a>, indices: Vec<&'a Index<'a>>, plan: &'b JoinPlan) -> Self {
-        let num_cover = plan.num_cover();
-        let (mut vc, mut srs, mut scans) = (
-            Vec::with_capacity(num_cover),
-            Vec::with_capacity(num_cover),
-            Vec::with_capacity(num_cover - 1),
-        );
-        vc.push(sr0.images()[0][0]);
-        srs.push(sr0);
-        scans.push(Intersection::new(
-            plan.indexed_joins()[0]
-                .scan()
-                .iter()
-                .map(|&(sr, eqv)| srs[sr].images()[eqv])
-                .collect(),
-        ));
-        Self {
-            num_cover,
-            vc,
-            srs,
-            scans,
-            indices,
-            indexed_joins: plan.indexed_joins(),
-            intersections: plan.intersections(),
-        }
-    }
-}
-
-impl<'a, 'b> Iterator for OneJoin<'a, 'b> {
-    type Item = JoinedSuperRow<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(v1) = self.scans.last_mut().and_then(|x| x.next()) {
-                if let Some(sr1) = self.indices[self.scans.len() - 1].get(v1) {
-                    self.srs.push(sr1);
-                    self.vc.push(v1);
-                    if self.vc.len() == self.num_cover {
-                        let emit = JoinedSuperRow::new(
-                            self.vc.clone(),
-                            self.intersections
-                                .iter()
-                                .map(|x| {
-                                    Intersection::new(
-                                        x.intersection()
-                                            .iter()
-                                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv])
-                                            .collect(),
-                                    )
-                                })
-                                .collect(),
-                        );
-                        self.vc.pop();
-                        self.srs.pop();
-                        return Some(emit);
-                    } else {
-                        self.scans.push(Intersection::new(
-                            self.indexed_joins[self.vc.len() - 1]
-                                .scan()
-                                .iter()
-                                .map(|&(sr, eqv)| self.srs[sr].images()[eqv])
-                                .collect(),
-                        ));
-                    }
-                }
-            } else {
-                if self.vc.pop().is_none() {
-                    return None;
-                }
-                self.srs.pop();
-                self.scans.pop();
-            }
-        }
-    }
-}
-
-fn create_indices<'a, 'b>(
-    super_row_mms: &'a [MemoryManager],
-    index_mms: &'a [MemoryManager],
-    index_type: &'b IndexType,
-) -> Vec<Index<'a>> {
-    super_row_mms
-        .iter()
-        .zip(index_mms)
-        .map(|(super_row_mm, index_mm)| Index::new(super_row_mm, index_mm, index_type))
-        .collect()
-}
 
 fn count_rows_star(super_row_mm: &MemoryManager, vertex_eqv: &[(VId, usize)]) -> usize {
     SuperRows::new(super_row_mm)
@@ -158,7 +59,10 @@ pub fn count_rows<'a, 'b>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::executor::{add_super_row_and_index_compact, empty_super_row_mm};
+    use crate::{
+        executor::{add_super_row_and_index_compact, empty_super_row_mm},
+        planner::{IndexType, IndexedJoinPlan, IntersectionPlan},
+    };
 
     #[test]
     fn test_count_rows_join() {

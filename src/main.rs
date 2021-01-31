@@ -6,11 +6,16 @@ use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
     data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
-    executor::{count_rows, SuperRows, SuperRowsInfo},
+    executor::{count_rows, enumerate, SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
     planner::{IndexType, MemoryManagerType, Plan, Task},
 };
-use std::{error::Error, fs::File, io::Read, path::PathBuf};
+use std::{
+    error::Error,
+    fs::File,
+    io::{BufWriter, Read},
+    path::PathBuf,
+};
 
 #[derive(Debug, Display, PartialEq)]
 enum Err {
@@ -93,13 +98,11 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     if matches.is_present("count-srs") {
         handle_match_count_srs(&plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("count-rows") {
-        if matches.is_present("parallel") {
-            handle_match_count_rows_parallel(&plan, &super_row_mms, &index_mms)?;
-        } else {
-            handle_match_count_rows(&plan, &super_row_mms, &index_mms)?;
-        }
+        handle_match_count_rows(&plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("outfile") {
         handle_match_outfile(matches, &plan, &super_row_mms, &index_mms)?;
+    } else if matches.is_present("to-stdout") {
+        handle_match_to_stdout(&plan, &super_row_mms, &index_mms)?;
     }
     eprintln!(
         "total_time: {}",
@@ -131,59 +134,6 @@ fn handle_match_count_srs(
 }
 
 fn handle_match_count_rows(
-    plan: &Plan,
-    super_row_mms: &[MemoryManager],
-    index_mms: &[MemoryManager],
-) -> std::io::Result<()> {
-    let time_now = std::time::Instant::now();
-    if plan.stars().is_empty() {
-        eprintln!("num_rows: 0");
-    } else if let Some(srs) = plan.execute_join_plan(&super_row_mms, &index_mms) {
-        let num_rows: usize = if let Some(gc) = plan.global_constraint() {
-            srs.map(|sr| {
-                sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                    .filter(|row| gc.f()(row))
-                    .count()
-            })
-            .sum()
-        } else {
-            srs.map(|sr| {
-                sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                    .count()
-            })
-            .sum()
-        };
-        eprintln!(
-            "join_decompress_time: {}",
-            (std::time::Instant::now() - time_now).as_millis()
-        );
-        eprintln!("num_rows: {}", num_rows);
-    } else {
-        let srs = SuperRows::new(super_row_mms.last().unwrap());
-        let num_rows: usize = if let Some(gc) = plan.global_constraint() {
-            srs.map(|sr| {
-                sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                    .filter(|row| gc.f()(row))
-                    .count()
-            })
-            .sum()
-        } else {
-            srs.map(|sr| {
-                sr.decompress(plan.join_plan().unwrap().sorted_vertex_eqv())
-                    .count()
-            })
-            .sum()
-        };
-        eprintln!(
-            "decompress_time: {}",
-            (std::time::Instant::now() - time_now).as_millis()
-        );
-        eprintln!("num_rows: {}", num_rows);
-    };
-    Ok(())
-}
-
-fn handle_match_count_rows_parallel(
     plan: &Plan,
     super_row_mms: &[MemoryManager],
     index_mms: &[MemoryManager],
@@ -226,6 +176,26 @@ fn handle_match_outfile(
     } else {
         eprintln!("warning: no_join");
     }
+    Ok(())
+}
+
+fn handle_match_to_stdout(
+    plan: &Plan,
+    super_row_mms: &[MemoryManager],
+    index_mms: &[MemoryManager],
+) -> std::io::Result<()> {
+    let time_now = std::time::Instant::now();
+    let num_rows = enumerate(
+        &mut BufWriter::new(std::io::stdout()),
+        super_row_mms,
+        index_mms,
+        plan,
+    )?;
+    eprintln!(
+        "enumerate_time: {}",
+        (std::time::Instant::now() - time_now).as_millis()
+    );
+    eprintln!("num_rows: {}", num_rows);
     Ok(())
 }
 
@@ -314,11 +284,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .arg(Arg::with_name("DATAGRAPH").required(true))
                 .arg(Arg::with_name("QUERY").required(true))
                 .arg(
-                    Arg::with_name("parallel")
-                        .long("parallel")
-                        .takes_value(false),
-                )
-                .arg(
                     Arg::with_name("count-srs")
                         .help("Counts number of SuperRows")
                         .long("count-srs")
@@ -328,6 +293,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Arg::with_name("count-rows")
                         .help("Counts rows of matching results")
                         .long("count-rows")
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("to-stdout")
+                        .long("to-stdout")
                         .takes_value(false),
                 )
                 .arg(
@@ -389,7 +359,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .default_value("sorted")
                         .possible_values(&["sorted", "hash"]),
                 )
-                .group(ArgGroup::with_name("output").args(&["count-srs", "count-rows", "outfile"])),
+                .group(ArgGroup::with_name("output").args(&[
+                    "count-srs",
+                    "count-rows",
+                    "outfile",
+                    "to-stdout",
+                ])),
         )
         .subcommand(
             SubCommand::with_name("plan")

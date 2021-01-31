@@ -2,7 +2,11 @@
 
 pub use count::count_rows;
 pub use decompress::{decompress, write_results};
-pub use join::{join, Index, Intersection, JoinedSuperRow, JoinedSuperRowIter, JoinedSuperRows};
+pub use enumerate::enumerate;
+pub use join::{
+    create_indices, join, Index, Intersection, JoinedSuperRow, JoinedSuperRowIter, JoinedSuperRows,
+    OneJoin,
+};
 pub use match_characteristics::match_characteristics;
 pub use super_row::{
     add_super_row, add_super_row_and_index, add_super_row_and_index_compact, empty_super_row_mm,
@@ -15,6 +19,7 @@ pub(crate) use super_row::{
 
 mod count;
 mod decompress;
+mod enumerate;
 mod join;
 mod match_characteristics;
 mod super_row;
