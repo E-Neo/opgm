@@ -62,6 +62,7 @@ pub struct Planner<'a, 'b, 'c> {
     star_sr_mm_type: MemoryManagerType<'c>,
     index_mm_type: MemoryManagerType<'c>,
     index_type: IndexType,
+    roots: Option<Vec<VId>>,
 }
 
 impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
@@ -77,6 +78,7 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
             star_sr_mm_type: MemoryManagerType::Mem,
             index_mm_type: MemoryManagerType::Mem,
             index_type: IndexType::Sorted,
+            roots: None,
         }
     }
 
@@ -95,8 +97,17 @@ impl<'a, 'b, 'c> Planner<'a, 'b, 'c> {
         self
     }
 
+    pub fn roots(mut self, roots: Vec<VId>) -> Self {
+        self.roots = Some(roots);
+        self
+    }
+
     pub fn plan(mut self) -> Plan<'a, 'b, 'c> {
-        let roots = decompose_stars(self.data_graph, self.pattern_graph);
+        let roots = if let Some(roots) = &self.roots {
+            roots.clone()
+        } else {
+            decompose_stars(self.data_graph, self.pattern_graph)
+        };
         let characteristic_ids = self.create_characteristic_ids(&roots);
         let stars = self.create_stars(&roots, &characteristic_ids);
         let stars_plan = self.create_stars_plan(&characteristic_ids);

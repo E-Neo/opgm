@@ -9,6 +9,7 @@ use opgm::{
     executor::{count_rows, enumerate, SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
     planner::{IndexType, MemoryManagerType, Plan, Task},
+    types::VId,
 };
 use std::{
     error::Error,
@@ -74,7 +75,7 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     let (pattern_graph, vc_info, ec_info, gcs) =
         compile(&query).map_err(|e| Err::CompileError(e.to_string()))?;
     let mut task = Task::new(&data_graph, pattern_graph, &vc_info, &ec_info, gcs);
-    let plan = task
+    let mut planner = task
         .prepare()
         .star_sr_mm_type(parse_mm_type(
             matches.value_of("star-mm-type").unwrap(),
@@ -86,8 +87,17 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
             matches.value_of("directory"),
             matches.value_of("name"),
         ))
-        .index_type(parse_index_type(matches.value_of("index-type").unwrap()))
-        .plan();
+        .index_type(parse_index_type(matches.value_of("index-type").unwrap()));
+    if matches.is_present("roots") {
+        planner = planner.roots(
+            matches
+                .values_of("roots")
+                .unwrap()
+                .map(|x| x.parse::<VId>().unwrap())
+                .collect(),
+        );
+    }
+    let plan = planner.plan();
     eprintln!(
         "star_root_ids: {:?}",
         plan.stars()
@@ -330,6 +340,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .takes_value(true)
                         .default_value("sorted")
                         .possible_values(&["sorted", "hash"]),
+                )
+                .arg(
+                    Arg::with_name("roots")
+                        .long("roots")
+                        .takes_value(true)
+                        .multiple(true)
+                        .require_delimiter(true),
                 )
                 .group(ArgGroup::with_name("output").args(&[
                     "count-srs",
