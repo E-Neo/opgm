@@ -93,49 +93,42 @@ fn match_data_vertex(
     });
 }
 
+/// Returns number of neighbors wrote to file.
 fn match_data_vertex_for_one_info(
     vertex: &DataVertex,
     info: &CharacteristicInfo,
     super_row_mm: &mut MemoryManager,
     index_mm: &mut MemoryManager,
     sr_pos_idx_pos: &mut (usize, usize),
-) {
+) -> usize {
     if let Some(vc) = info.characteristic().root_constraint() {
         if !vc.f()(vertex.id()) {
-            return;
+            return 0;
         }
     }
+    let mut num_vids = 0;
     let &mut (sr_pos, idx_pos) = sr_pos_idx_pos;
-    let root_pos = sr_pos
-        + size_of::<usize>()
-        + (1 + info.characteristic().info_nums().len()) * size_of::<PosLen>();
-    let mut pos = root_pos + size_of::<VId>();
-    if allocate(super_row_mm, sr_pos, vertex, info) {
+    if let Some(mut pos_lens) = allocate(super_row_mm, sr_pos, vertex, info) {
         let (mut left_iter, mut right_iter) =
             (vertex.vlabels(), info.nlabel_ninfo_num_eqvs().iter());
         let (mut left, mut right) = (left_iter.next(), right_iter.next());
-        while let (Some((x, _, neighbors)), Some((y, ninfo_num_eqvs))) = (&left, right) {
-            match (*x).cmp(y) {
+        while let (Some((x, _, neighbors)), Some((y, ninfo_num_eqvs))) = (left, right) {
+            match x.cmp(y) {
                 Ordering::Less => {
                     left = left_iter.next();
                 }
                 Ordering::Equal => {
-                    for &(ninfo, num, eqv) in ninfo_num_eqvs {
-                        let num_wrote = match_neighbors(
-                            vertex,
-                            neighbors.clone(),
-                            ninfo,
-                            super_row_mm,
-                            sr_pos,
-                            eqv,
-                            pos,
-                        );
-                        if num_wrote < num {
-                            return;
-                        } else {
-                            pos += num_wrote * size_of::<VId>();
-                        }
+                    let num_wrote = match_neighbors(
+                        super_row_mm,
+                        &mut pos_lens,
+                        vertex,
+                        neighbors,
+                        ninfo_num_eqvs,
+                    );
+                    if num_wrote == 0 {
+                        return 0;
                     }
+                    num_vids += num_wrote;
                     left = left_iter.next();
                     right = right_iter.next();
                 }
@@ -144,42 +137,92 @@ fn match_data_vertex_for_one_info(
                 }
             }
         }
+        let &(pos, len) = pos_lens.last().unwrap();
+        let pos = pos + len * size_of::<VId>();
         write_num_bytes(super_row_mm, sr_pos, pos - sr_pos);
-        write_pos_len(super_row_mm, sr_pos, 0, root_pos, 1);
-        write_vid(super_row_mm, root_pos, vertex.id());
+        for (eqv, &(pos, len)) in pos_lens.iter().enumerate() {
+            write_pos_len(super_row_mm, sr_pos, eqv, pos, len);
+        }
+        write_vid(super_row_mm, pos_lens[0].0, vertex.id());
         write_index(index_mm, idx_pos, vertex.id(), sr_pos);
         *sr_pos_idx_pos = (pos, idx_pos + size_of::<VIdPos>());
     }
+    num_vids
 }
 
-/// Scan the neighbors and write them to the SuperRow file if matched.
-///
-/// Returns the number of vertices written to file.
-fn match_neighbors<'a, N>(
+fn match_neighbors<'a, N: IntoIterator<Item = DataNeighbor<'a>>>(
+    super_row_mm: &mut MemoryManager,
+    pos_lens: &mut [(usize, usize)],
     vertex: &DataVertex,
     neighbors: N,
-    ninfo: &NeighborInfo,
+    ninfo_num_eqvs: &[(&NeighborInfo, usize, usize)],
+) -> usize {
+    for neighbor in neighbors {
+        for &(ninfo, _, eqv) in ninfo_num_eqvs {
+            if check_neighbor_constraints(vertex, &neighbor, ninfo)
+                && check_neighbor_degrees(&neighbor, ninfo)
+                && check_neighbor_edges(&neighbor, ninfo)
+            {
+                let pos_len = &mut pos_lens[eqv];
+                let &mut (pos, len) = pos_len;
+                let pos = pos + len * size_of::<VId>();
+                write_vid(super_row_mm, pos, neighbor.id());
+                pos_len.1 += 1;
+            }
+        }
+    }
+    let mut num_vids = 0;
+    for &(_, _, eqv) in ninfo_num_eqvs {
+        let (_, len) = pos_lens[eqv];
+        if len == 0 {
+            return 0;
+        } else {
+            num_vids += len;
+        }
+    }
+    num_vids
+}
+
+/// Returns PosLen for each eqv if the vertex may match.
+fn allocate(
     super_row_mm: &mut MemoryManager,
     sr_pos: usize,
-    eqv: usize,
-    pos: usize,
-) -> usize
-where
-    N: IntoIterator<Item = DataNeighbor<'a>>,
-{
-    let mut new_pos = pos;
-    neighbors
-        .into_iter()
-        .filter(|neighbor| check_neighbor_constraints(vertex, neighbor, ninfo))
-        .filter(|neighbor| check_neighbor_degrees(neighbor, ninfo))
-        .filter(|neighbor| check_neighbor_edges(neighbor, ninfo))
-        .for_each(|neighbor| {
-            write_vid(super_row_mm, new_pos, neighbor.id());
-            new_pos += size_of::<VId>();
-        });
-    let len = (new_pos - pos) / size_of::<VId>();
-    write_pos_len(super_row_mm, sr_pos, eqv, pos, len);
-    len
+    vertex: &DataVertex,
+    info: &CharacteristicInfo,
+) -> Option<Vec<(usize, usize)>> {
+    let mut pos = sr_pos
+        + size_of::<usize>()
+        + (1 + info.characteristic().info_nums().len()) * size_of::<PosLen>();
+    let mut pos_lens = vec![(0, 0); info.characteristic().info_nums().len() + 1];
+    pos_lens[0] = (pos, 1);
+    pos += size_of::<VId>();
+    let mut left_iter = vertex.vlabels();
+    let mut right_iter = info.nlabel_ninfo_num_eqvs().iter();
+    let (mut left, mut right) = (left_iter.next(), right_iter.next());
+    while let (Some((x, xlen, _)), Some((y, ninfo_num_eqvs))) = (left, right) {
+        match x.cmp(y) {
+            Ordering::Less => {
+                left = left_iter.next();
+            }
+            Ordering::Equal => {
+                for &(_, _, eqv) in ninfo_num_eqvs {
+                    pos_lens[eqv].0 = pos;
+                    pos += xlen * size_of::<VId>();
+                }
+                left = left_iter.next();
+                right = right_iter.next();
+            }
+            Ordering::Greater => {
+                break;
+            }
+        }
+    }
+    if let Some(_) = right {
+        None
+    } else {
+        super_row_mm.resize(pos);
+        Some(pos_lens)
+    }
 }
 
 /// Checks the *vertex constraint* and the *edge constraint* of `neighbor`.
@@ -233,56 +276,6 @@ fn check_neighbor_edges(neighbor: &DataNeighbor, info: &NeighborInfo) -> bool {
         }
     }
     n_to_v_elabels.len() == 0 && v_to_n_elabels.len() == 0 && undirected_elabels.len() == 0
-}
-
-/// Tries to allocate space for a SuperRow.
-///
-/// It returns whether the `vertex` may match the `Characteristic`.
-fn allocate(
-    super_row_mm: &mut MemoryManager,
-    sr_pos: usize,
-    vertex: &DataVertex,
-    info: &CharacteristicInfo,
-) -> bool {
-    let mut num_vids = 1;
-    let mut left_iter = vertex.vlabels();
-    let mut right_iter = info
-        .nlabel_ninfo_num_eqvs()
-        .iter()
-        .map(|(&nlabel, ninfo_eqvs)| (nlabel, ninfo_eqvs.len()));
-    let (mut left, mut right) = (left_iter.next(), right_iter.next());
-    while let (Some((x, xlen, _)), Some((y, ylen))) = (left, right) {
-        match x.cmp(&y) {
-            Ordering::Less => {
-                left = left_iter.next();
-            }
-            Ordering::Equal => {
-                if ylen == 1 {
-                    num_vids += xlen;
-                } else if xlen >= ylen {
-                    num_vids += xlen * ylen;
-                } else {
-                    return false;
-                }
-                left = left_iter.next();
-                right = right_iter.next();
-            }
-            Ordering::Greater => {
-                break;
-            }
-        }
-    }
-    if let Some(_) = right {
-        false
-    } else {
-        super_row_mm.resize(
-            sr_pos
-                + size_of::<usize>()
-                + (1 + info.characteristic().info_nums().len()) * size_of::<PosLen>()
-                + num_vids * size_of::<VId>(),
-        );
-        true
-    }
 }
 
 /// Update the `SuperRowHeader` and truncate `super_row_mm` and `index_mm` in `ids`.
