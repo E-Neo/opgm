@@ -40,7 +40,7 @@ pub(crate) struct NeighborHeader {
 pub(crate) struct SuperRowHeader {
     pub num_rows: usize,
     pub num_eqvs: usize,
-    pub num_cover: usize,
+    pub num_vertices: usize,
 }
 
 #[repr(C, packed)]

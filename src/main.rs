@@ -88,6 +88,17 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         ))
         .index_type(parse_index_type(matches.value_of("index-type").unwrap()))
         .plan();
+    eprintln!(
+        "star_root_ids: {:?}",
+        plan.stars()
+            .iter()
+            .map(|star| (format!("u{}", star.root()), star.id()))
+            .collect::<Vec<_>>()
+    );
+    if let Some(join_plan) = plan.join_plan() {
+        eprintln!("indexed_joins: {:?}", join_plan.indexed_joins());
+        eprintln!("intersections: {:?}", join_plan.intersections());
+    }
     let (mut super_row_mms, mut index_mms) = plan.allocate();
     let time_now = std::time::Instant::now();
     plan.execute_stars_plan(&mut super_row_mms, &mut index_mms);

@@ -138,13 +138,13 @@ impl<'a> Iterator for SuperRows<'a> {
 pub struct SuperRowsInfo {
     num_rows: usize,
     num_eqvs: usize,
-    num_cover: usize,
+    num_vertices: usize,
     eqv_total_num_vertices: Vec<usize>,
 }
 
 impl SuperRowsInfo {
     pub fn new(mm: &MemoryManager) -> Self {
-        let (num_rows, num_eqvs, num_cover) = read_super_row_header(mm);
+        let (num_rows, num_eqvs, num_vertices) = read_super_row_header(mm);
         let mut eqv_total_num_vertices = vec![0; num_eqvs];
         for sr in SuperRows::new(mm) {
             for (num, &img) in eqv_total_num_vertices.iter_mut().zip(sr.images()) {
@@ -154,7 +154,7 @@ impl SuperRowsInfo {
         Self {
             num_rows,
             num_eqvs,
-            num_cover,
+            num_vertices,
             eqv_total_num_vertices,
         }
     }
@@ -164,7 +164,7 @@ impl std::fmt::Display for SuperRowsInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "num_rows: {}", self.num_rows)?;
         writeln!(f, "num_eqvs: {}", self.num_eqvs)?;
-        writeln!(f, "num_cover: {}", self.num_cover)?;
+        writeln!(f, "num_vertices: {}", self.num_vertices)?;
         writeln!(
             f,
             "eqv_total_num_vertices: {:?}",
@@ -184,7 +184,7 @@ impl std::fmt::Display for SuperRowsInfo {
 
 pub(crate) fn read_super_row_header(super_row_mm: &MemoryManager) -> (usize, usize, usize) {
     let header = unsafe { &*super_row_mm.read::<SuperRowHeader>(0) };
-    (header.num_rows, header.num_eqvs, header.num_cover)
+    (header.num_rows, header.num_eqvs, header.num_vertices)
 }
 
 fn read_pos_lens(super_row_mm: &MemoryManager, sr_pos: usize, num_eqvs: usize) -> &[PosLen] {
@@ -199,14 +199,14 @@ pub(crate) fn write_super_row_header(
     super_row_mm: &mut MemoryManager,
     num_rows: usize,
     num_eqvs: usize,
-    num_cover: usize,
+    num_vertices: usize,
 ) {
     super_row_mm.write(
         0,
         &SuperRowHeader {
             num_rows,
             num_eqvs,
-            num_cover,
+            num_vertices,
         } as *const SuperRowHeader,
         1,
     );
@@ -238,14 +238,14 @@ pub(crate) fn write_index(index_mm: &mut MemoryManager, idx_pos: usize, vid: VId
     index_mm.write(idx_pos, &VIdPos { vid, pos } as *const _, 1);
 }
 
-pub fn empty_super_row_mm(super_row_mm: &mut MemoryManager, num_eqvs: usize, num_cover: usize) {
+pub fn empty_super_row_mm(super_row_mm: &mut MemoryManager, num_eqvs: usize, num_vertices: usize) {
     super_row_mm.resize(size_of::<SuperRowHeader>());
     super_row_mm.write(
         0,
         &SuperRowHeader {
             num_rows: 0,
             num_eqvs,
-            num_cover,
+            num_vertices,
         } as *const _,
         1,
     );
@@ -253,7 +253,8 @@ pub fn empty_super_row_mm(super_row_mm: &mut MemoryManager, num_eqvs: usize, num
 
 pub fn add_super_row(super_row_mm: &mut MemoryManager, bounds: &[usize], super_row: &[&[VId]]) {
     let header = unsafe { &*super_row_mm.read::<SuperRowHeader>(0) };
-    let (num_rows, num_eqvs, num_cover) = (header.num_rows, header.num_eqvs, header.num_cover);
+    let (num_rows, num_eqvs, num_vertices) =
+        (header.num_rows, header.num_eqvs, header.num_vertices);
     let sr_pos = super_row_mm.len();
     let num_bytes = calculate_num_byte(num_eqvs, bounds);
     super_row_mm.resize(sr_pos + num_bytes);
@@ -271,7 +272,7 @@ pub fn add_super_row(super_row_mm: &mut MemoryManager, bounds: &[usize], super_r
         super_row_mm.write(pos, img.as_ptr(), img.len());
         pos += bound * size_of::<VId>();
     }
-    write_super_row_header(super_row_mm, num_rows + 1, num_eqvs, num_cover);
+    write_super_row_header(super_row_mm, num_rows + 1, num_eqvs, num_vertices);
 }
 
 pub fn add_super_row_and_index(

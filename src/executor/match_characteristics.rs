@@ -25,8 +25,16 @@ pub fn match_characteristics(
 ) {
     let (vertices_len, vertices) = data_graph.vertices(vlabel);
     initialize_results(infos, super_row_mms, index_mms, vertices_len);
-    let sr_pos_idx_poses = scan_data_vertices(vertices, infos, super_row_mms, index_mms);
-    finish_results(infos, super_row_mms, index_mms, &sr_pos_idx_poses);
+    let mut num_vertices = vec![0; index_mms.len()];
+    let sr_pos_idx_poses =
+        scan_data_vertices(vertices, infos, super_row_mms, index_mms, &mut num_vertices);
+    finish_results(
+        infos,
+        super_row_mms,
+        index_mms,
+        &sr_pos_idx_poses,
+        &num_vertices,
+    );
 }
 
 /// Allocate space for `SuperRowHeader` and the indices.
@@ -57,6 +65,7 @@ fn scan_data_vertices<'a, VS>(
     infos: &[CharacteristicInfo],
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
+    num_vertices: &mut [usize],
 ) -> Vec<(usize, usize)>
 where
     VS: IntoIterator<Item = DataVertex<'a>>,
@@ -69,6 +78,7 @@ where
             super_row_mms,
             index_mms,
             &mut sr_pos_idx_poses,
+            num_vertices,
         );
     }
     sr_pos_idx_poses
@@ -81,9 +91,10 @@ fn match_data_vertex(
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
     sr_pos_idx_poses: &mut [(usize, usize)],
+    num_vertices: &mut [usize],
 ) {
     infos.iter().for_each(|info| {
-        match_data_vertex_for_one_info(
+        num_vertices[info.id()] += match_data_vertex_for_one_info(
             vertex,
             info,
             &mut super_row_mms[info.id()],
@@ -147,7 +158,7 @@ fn match_data_vertex_for_one_info(
         write_index(index_mm, idx_pos, vertex.id(), sr_pos);
         *sr_pos_idx_pos = (pos, idx_pos + size_of::<VIdPos>());
     }
-    num_vids
+    num_vids + 1
 }
 
 fn match_neighbors<'a, N: IntoIterator<Item = DataNeighbor<'a>>>(
@@ -284,6 +295,7 @@ fn finish_results(
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
     sr_pos_idx_poses: &[(usize, usize)],
+    num_vertices: &[usize],
 ) {
     infos.iter().for_each(|info| {
         let (sr_pos, idx_pos) = sr_pos_idx_poses[info.id()];
@@ -291,7 +303,7 @@ fn finish_results(
             &mut super_row_mms[info.id()],
             idx_pos / size_of::<VIdPos>(),
             info.characteristic().info_nums().len() + 1,
-            1,
+            num_vertices[info.id()],
         );
         super_row_mms[info.id()].resize(sr_pos);
         index_mms[info.id()].resize(idx_pos);
@@ -377,7 +389,7 @@ mod tests {
             super_row_mms.as_mut_slice(),
             index_mms.as_mut_slice(),
         );
-        let mut super_row_mm0 = create_super_row_mm(3, 1);
+        let mut super_row_mm0 = create_super_row_mm(3, 8);
         let mut index_mm0 = MemoryManager::Mem(vec![]);
         add_super_row_and_index(
             &mut super_row_mm0,
@@ -391,7 +403,7 @@ mod tests {
             &[1, 2, 1],
             &[&[5], &[6, 7], &[8]],
         );
-        let mut super_row_mm1 = create_super_row_mm(2, 1);
+        let mut super_row_mm1 = create_super_row_mm(2, 6);
         let mut index_mm1 = MemoryManager::Mem(vec![]);
         add_super_row_and_index(
             &mut super_row_mm1,
@@ -496,7 +508,7 @@ mod tests {
             &mut super_row_mms,
             &mut index_mms,
         );
-        empty_super_row_mm(&mut sr_mms[0], 3, 1);
+        empty_super_row_mm(&mut sr_mms[0], 3, 4);
         add_super_row_and_index(
             &mut sr_mms[0],
             &mut idx_mms[0],
@@ -515,7 +527,7 @@ mod tests {
             &mut super_row_mms,
             &mut index_mms,
         );
-        empty_super_row_mm(&mut sr_mms[1], 3, 1);
+        empty_super_row_mm(&mut sr_mms[1], 3, 4);
         add_super_row_and_index(
             &mut sr_mms[1],
             &mut idx_mms[1],

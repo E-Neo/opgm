@@ -6,7 +6,7 @@ use crate::{
         generator::{extract_global_constraint, EdgeConstraintsInfo, VertexConstraintsInfo},
     },
     data_graph::DataGraph,
-    executor::{join, match_characteristics, JoinedSuperRows},
+    executor::{join, match_characteristics, read_super_row_header, JoinedSuperRows},
     memory_manager::{MemoryManager, MmapFile},
     pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
     planner::decompose_stars,
@@ -535,6 +535,10 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
         self.stars_plan().iter().for_each(|(vlabel, infos)| {
             match_characteristics(self.data_graph, *vlabel, infos, super_row_mms, index_mms)
         });
+        for (id, sr) in super_row_mms.iter().enumerate() {
+            let (num_rows, _, num_vertices) = read_super_row_header(sr);
+            eprintln!("characteristic[{}]: ({}, {})", id, num_rows, num_vertices);
+        }
     }
 
     pub fn execute_join_plan<'s, 'm>(
