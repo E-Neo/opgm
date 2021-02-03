@@ -2,6 +2,7 @@ use crate::{
     memory_manager::MemoryManager,
     types::{PosLen, SuperRowHeader, VId, VIdPos},
 };
+use rayon::prelude::*;
 use std::mem::size_of;
 
 pub struct SuperRow<'a> {
@@ -42,29 +43,42 @@ impl<'a> SuperRow<'a> {
     }
 
     pub fn count_rows_slow(&self, vertex_eqv: &'a [(VId, usize)]) -> usize {
-        let mut num_rows = 0;
-        let mappings: Vec<_> = vertex_eqv
+        let mut mappings: Vec<_> = vertex_eqv
             .iter()
-            .map(|(_, eqv)| self.images()[*eqv])
+            .map(|&(_, eqv)| self.images()[eqv])
             .collect();
-        let mut offsets = vec![0; mappings.len()];
-        let mut row = Vec::with_capacity(mappings.len());
-        loop {
-            let col = row.len();
-            if col == mappings.len() {
-                num_rows += 1;
-                row.pop();
-            } else if offsets[col] < mappings[col].len() {
-                row.push(mappings[col][offsets[col]]);
-                offsets[col] += 1;
-            } else {
-                if row.pop().is_none() {
-                    break;
+        let top = mappings.remove(
+            mappings
+                .iter()
+                .enumerate()
+                .map(|(i, &img)| (i, img.len()))
+                .max_by_key(|&(_, len)| len)
+                .map(|(i, _)| i)
+                .unwrap(),
+        );
+        top.par_iter()
+            .map(|_| {
+                let mut num_rows = 0;
+                let mut offsets = vec![0; mappings.len()];
+                let mut row = Vec::with_capacity(mappings.len());
+                loop {
+                    let col = row.len();
+                    if col == mappings.len() {
+                        num_rows += 1;
+                        row.pop();
+                    } else if offsets[col] < mappings[col].len() {
+                        row.push(mappings[col][offsets[col]]);
+                        offsets[col] += 1;
+                    } else {
+                        if row.pop().is_none() {
+                            break;
+                        }
+                        offsets[col] = 0;
+                    }
                 }
-                offsets[col] = 0;
-            }
-        }
-        num_rows
+                num_rows
+            })
+            .sum()
     }
 
     /// Decompress the SuperRow.
