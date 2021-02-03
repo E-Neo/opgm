@@ -2,8 +2,8 @@ use crate::{
     memory_manager::MemoryManager,
     types::{PosLen, SuperRowHeader, VId, VIdPos},
 };
-use std::collections::HashSet;
-use std::mem::size_of;
+use itertools::Itertools;
+use std::{collections::HashSet, mem::size_of};
 
 pub struct SuperRow<'a> {
     images: Vec<&'a [VId]>,
@@ -33,6 +33,23 @@ impl<'a> SuperRow<'a> {
                 .sub(size_of::<PosLen>() * self.num_eqvs() + size_of::<usize>())
                 as *const usize)
         }
+    }
+
+    pub fn count_rows(&self, vertex_eqv: &'a [(VId, usize)]) -> usize {
+        vertex_eqv
+            .iter()
+            .map(|&(_, eqv)| self.images()[eqv].len())
+            .product()
+    }
+
+    pub fn count_rows_slow(&self, vertex_eqv: &'a [(VId, usize)]) -> usize {
+        let mut num_rows = 0;
+        vertex_eqv
+            .iter()
+            .map(|&(_, eqv)| self.images()[eqv])
+            .multi_cartesian_product()
+            .for_each(|_| num_rows += 1);
+        num_rows
     }
 
     /// Decompress the SuperRow.

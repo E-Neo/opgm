@@ -4,6 +4,7 @@ use crate::{
     planner::{IndexType, IndexedJoinPlan, IntersectionPlan, JoinPlan},
     types::{VId, VIdPos},
 };
+use itertools::Itertools;
 use std::{collections::HashMap, mem::size_of};
 
 pub struct Intersection<'a> {
@@ -217,6 +218,20 @@ impl<'a> JoinedSuperRow<'a> {
             vertex_cover,
             leaves,
         }
+    }
+
+    pub fn count_rows(self, _vertex_eqv: &[(VId, usize)]) -> usize {
+        self.leaves.into_iter().map(|x| x.count()).product()
+    }
+
+    pub fn count_rows_slow(self, __vertex_eqv: &[(VId, usize)]) -> usize {
+        let mut num_rows = 0;
+        self.leaves
+            .into_iter()
+            .map(|x| x.collect::<Vec<VId>>())
+            .multi_cartesian_product()
+            .for_each(|_| num_rows += 1);
+        num_rows
     }
 
     pub fn decompress(mut self, vertex_eqv: &[(VId, usize)]) -> JoinedSuperRowIter {

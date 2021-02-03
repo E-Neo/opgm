@@ -1,6 +1,6 @@
 //! The executor.
 
-pub use count::count_rows;
+pub use count::{count_rows, count_rows_slow};
 pub use decompress::{decompress, write_results};
 pub use enumerate::enumerate;
 pub use join::{

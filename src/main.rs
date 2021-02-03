@@ -6,7 +6,7 @@ use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
     data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
-    executor::{count_rows, enumerate, SuperRows, SuperRowsInfo},
+    executor::{count_rows, count_rows_slow, enumerate, SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
     planner::{IndexType, MemoryManagerType, Plan, Task},
     types::VId,
@@ -120,6 +120,8 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         handle_match_count_srs(&plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("count-rows") {
         handle_match_count_rows(&plan, &super_row_mms, &index_mms)?;
+    } else if matches.is_present("count-rows-slow") {
+        handle_match_count_rows_slow(&plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("to-stdout") {
         handle_match_to_stdout(&plan, &super_row_mms, &index_mms)?;
     }
@@ -159,6 +161,21 @@ fn handle_match_count_rows(
 ) -> std::io::Result<()> {
     let time_now = std::time::Instant::now();
     let num_rows = count_rows(super_row_mms, index_mms, plan);
+    eprintln!(
+        "join_decompress_time: {}",
+        (std::time::Instant::now() - time_now).as_millis()
+    );
+    eprintln!("num_rows: {}", num_rows);
+    Ok(())
+}
+
+fn handle_match_count_rows_slow(
+    plan: &Plan,
+    super_row_mms: &[MemoryManager],
+    index_mms: &[MemoryManager],
+) -> std::io::Result<()> {
+    let time_now = std::time::Instant::now();
+    let num_rows = count_rows_slow(super_row_mms, index_mms, plan);
     eprintln!(
         "join_decompress_time: {}",
         (std::time::Instant::now() - time_now).as_millis()
@@ -279,8 +296,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .arg(
                     Arg::with_name("count-rows")
-                        .help("Counts rows of matching results")
+                        .help("Counts rows of matching results by compressed results")
                         .long("count-rows")
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("count-rows-slow")
+                        .help("Counts rows of matching results")
+                        .long("count-rows-slow")
                         .takes_value(false),
                 )
                 .arg(
@@ -351,6 +374,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .group(ArgGroup::with_name("output").args(&[
                     "count-srs",
                     "count-rows",
+                    "count-rows-slow",
                     "to-stdout",
                 ])),
         )
