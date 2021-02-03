@@ -5,6 +5,40 @@ use crate::{
 use rayon::prelude::*;
 use std::mem::size_of;
 
+fn longest_image<'a>(mappings: &mut Vec<&'a [VId]>) -> &'a [VId] {
+    mappings.remove(
+        mappings
+            .iter()
+            .enumerate()
+            .map(|(i, &img)| (i, img.len()))
+            .max_by_key(|&(_, len)| len)
+            .map(|(i, _)| i)
+            .unwrap(),
+    )
+}
+
+fn count_rows_slow_helper(mappings: &[&[VId]]) -> usize {
+    let mut num_rows = 0;
+    let mut offsets = vec![0; mappings.len()];
+    let mut row = Vec::with_capacity(mappings.len());
+    loop {
+        let col = row.len();
+        if col == mappings.len() {
+            num_rows += 1;
+            row.pop();
+        } else if offsets[col] < mappings[col].len() {
+            row.push(mappings[col][offsets[col]]);
+            offsets[col] += 1;
+        } else {
+            if row.pop().is_none() {
+                break;
+            }
+            offsets[col] = 0;
+        }
+    }
+    num_rows
+}
+
 pub struct SuperRow<'a> {
     images: Vec<&'a [VId]>,
 }
@@ -47,36 +81,13 @@ impl<'a> SuperRow<'a> {
             .iter()
             .map(|&(_, eqv)| self.images()[eqv])
             .collect();
-        let top = mappings.remove(
-            mappings
-                .iter()
-                .enumerate()
-                .map(|(i, &img)| (i, img.len()))
-                .max_by_key(|&(_, len)| len)
-                .map(|(i, _)| i)
-                .unwrap(),
-        );
-        top.par_iter()
+        let top1 = longest_image(&mut mappings);
+        let top2 = longest_image(&mut mappings);
+        top1.par_iter()
             .map(|_| {
-                let mut num_rows = 0;
-                let mut offsets = vec![0; mappings.len()];
-                let mut row = Vec::with_capacity(mappings.len());
-                loop {
-                    let col = row.len();
-                    if col == mappings.len() {
-                        num_rows += 1;
-                        row.pop();
-                    } else if offsets[col] < mappings[col].len() {
-                        row.push(mappings[col][offsets[col]]);
-                        offsets[col] += 1;
-                    } else {
-                        if row.pop().is_none() {
-                            break;
-                        }
-                        offsets[col] = 0;
-                    }
-                }
-                num_rows
+                top2.par_iter()
+                    .map(|_| count_rows_slow_helper(&mappings))
+                    .sum::<usize>()
             })
             .sum()
     }
