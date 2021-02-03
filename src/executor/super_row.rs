@@ -2,8 +2,7 @@ use crate::{
     memory_manager::MemoryManager,
     types::{PosLen, SuperRowHeader, VId, VIdPos},
 };
-use itertools::Itertools;
-use std::{collections::HashSet, mem::size_of};
+use std::mem::size_of;
 
 pub struct SuperRow<'a> {
     images: Vec<&'a [VId]>,
@@ -44,11 +43,27 @@ impl<'a> SuperRow<'a> {
 
     pub fn count_rows_slow(&self, vertex_eqv: &'a [(VId, usize)]) -> usize {
         let mut num_rows = 0;
-        vertex_eqv
+        let mappings: Vec<_> = vertex_eqv
             .iter()
-            .map(|&(_, eqv)| self.images()[eqv])
-            .multi_cartesian_product()
-            .for_each(|_| num_rows += 1);
+            .map(|(_, eqv)| self.images()[*eqv])
+            .collect();
+        let mut offsets = vec![0; mappings.len()];
+        let mut row = Vec::with_capacity(mappings.len());
+        loop {
+            let col = row.len();
+            if col == mappings.len() {
+                num_rows += 1;
+                row.pop();
+            } else if offsets[col] < mappings[col].len() {
+                row.push(mappings[col][offsets[col]]);
+                offsets[col] += 1;
+            } else {
+                if row.pop().is_none() {
+                    break;
+                }
+                offsets[col] = 0;
+            }
+        }
         num_rows
     }
 
@@ -64,7 +79,6 @@ impl<'a> SuperRow<'a> {
             mappings,
             mappings_offsets: vec![0; vertex_eqv.len()],
             row: Vec::with_capacity(vertex_eqv.len()),
-            row_set: HashSet::with_capacity(vertex_eqv.len()),
         }
     }
 }
@@ -79,7 +93,6 @@ pub struct SuperRowIter<'a> {
     mappings: Vec<&'a [VId]>,
     mappings_offsets: Vec<usize>,
     row: Vec<VId>,
-    row_set: HashSet<VId>,
 }
 
 impl<'a> Iterator for SuperRowIter<'a> {
@@ -90,23 +103,17 @@ impl<'a> Iterator for SuperRowIter<'a> {
             let col = self.row.len();
             if col == self.mappings.len() {
                 let row = self.row.clone();
-                if let Some(v) = self.row.pop() {
-                    self.row_set.remove(&v);
-                }
+                self.row.pop();
                 return Some(row);
             } else if self.mappings_offsets[col] < self.mappings[col].len() {
-                let v = self.mappings[col][self.mappings_offsets[col]];
-                if self.row_set.insert(v) {
-                    self.row.push(v);
-                }
+                self.row
+                    .push(self.mappings[col][self.mappings_offsets[col]]);
                 self.mappings_offsets[col] += 1;
             } else {
-                self.mappings_offsets[col] = 0;
-                if let Some(v) = self.row.pop() {
-                    self.row_set.remove(&v);
-                } else {
+                if self.row.pop().is_none() {
                     return None;
                 }
+                self.mappings_offsets[col] = 0;
             }
         }
     }
