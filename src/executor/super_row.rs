@@ -1,4 +1,5 @@
 use crate::{
+    executor::count_rows_slow_helper,
     memory_manager::MemoryManager,
     types::{PosLen, SuperRowHeader, VId, VIdPos},
 };
@@ -15,28 +16,6 @@ fn longest_image<'a>(mappings: &mut Vec<&'a [VId]>) -> &'a [VId] {
             .map(|(i, _)| i)
             .unwrap(),
     )
-}
-
-fn count_rows_slow_helper(mappings: &[&[VId]]) -> usize {
-    let mut num_rows = 0;
-    let mut offsets = vec![0; mappings.len()];
-    let mut row = Vec::with_capacity(mappings.len());
-    loop {
-        let col = row.len();
-        if col == mappings.len() {
-            num_rows += 1;
-            row.pop();
-        } else if offsets[col] < mappings[col].len() {
-            row.push(mappings[col][offsets[col]]);
-            offsets[col] += 1;
-        } else {
-            if row.pop().is_none() {
-                break;
-            }
-            offsets[col] = 0;
-        }
-    }
-    num_rows
 }
 
 pub struct SuperRow<'a> {

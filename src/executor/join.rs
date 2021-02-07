@@ -1,5 +1,5 @@
 use crate::{
-    executor::{read_super_row_header, SuperRow, SuperRows},
+    executor::{count_rows_slow_helper, read_super_row_header, SuperRow, SuperRows},
     memory_manager::MemoryManager,
     planner::{IndexType, IndexedJoinPlan, IntersectionPlan, JoinPlan},
     types::{VId, VIdPos},
@@ -224,30 +224,19 @@ impl<'a> JoinedSuperRow<'a> {
     }
 
     pub fn count_rows_slow(self, __vertex_eqv: &[(VId, usize)]) -> usize {
-        let mut num_rows = 0;
-        let mappings: Vec<_> = self
-            .leaves
-            .into_iter()
-            .map(|x| x.collect::<Vec<_>>())
-            .collect();
-        let mut offsets = vec![0; mappings.len()];
-        let mut row = Vec::with_capacity(mappings.len());
-        loop {
-            let col = row.len();
-            if col == mappings.len() {
-                num_rows += 1;
-                row.pop();
-            } else if offsets[col] < mappings[col].len() {
-                row.push(mappings[col][offsets[col]]);
-                offsets[col] += 1;
+        let mut intersection_vecs: Vec<Vec<VId>> = Vec::with_capacity(self.leaves.len());
+        let mut mappings: Vec<&[VId]> = Vec::with_capacity(self.leaves.len());
+        self.leaves.into_iter().for_each(|x| {
+            if x.images.len() == 1 {
+                mappings.push(x.images[0]);
             } else {
-                if row.pop().is_none() {
-                    break;
-                }
-                offsets[col] = 0;
+                intersection_vecs.push(x.collect::<Vec<_>>());
             }
-        }
-        num_rows
+        });
+        intersection_vecs.iter().for_each(|x| {
+            mappings.push(x.as_slice());
+        });
+        count_rows_slow_helper(&mappings)
     }
 
     pub fn decompress(mut self, vertex_eqv: &[(VId, usize)]) -> JoinedSuperRowIter {

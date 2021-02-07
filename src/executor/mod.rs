@@ -23,3 +23,27 @@ mod enumerate;
 mod join;
 mod match_characteristics;
 mod super_row;
+
+use crate::types::VId;
+
+pub(crate) fn count_rows_slow_helper(mappings: &[&[VId]]) -> usize {
+    let mut num_rows = 0;
+    let mut offsets = vec![0; mappings.len()];
+    let mut row = Vec::with_capacity(mappings.len());
+    loop {
+        let col = row.len();
+        if col == mappings.len() {
+            num_rows += 1;
+            row.pop();
+        } else if offsets[col] < mappings[col].len() {
+            row.push(mappings[col][offsets[col]]);
+            offsets[col] += 1;
+        } else {
+            if row.pop().is_none() {
+                break;
+            }
+            offsets[col] = 0;
+        }
+    }
+    num_rows
+}
