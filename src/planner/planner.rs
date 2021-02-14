@@ -547,8 +547,11 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
             match_characteristics(self.data_graph, *vlabel, infos, super_row_mms, index_mms)
         });
         for (id, sr) in super_row_mms.iter().enumerate() {
-            let (num_rows, _, num_vertices) = read_super_row_header(sr);
-            eprintln!("characteristic[{}]: ({}, {})", id, num_rows, num_vertices);
+            let (num_rows, num_eqvs, num_vertices) = read_super_row_header(sr);
+            eprintln!(
+                "characteristic[{}]: ({}, {}, {})",
+                id, num_rows, num_eqvs, num_vertices
+            );
         }
     }
 
