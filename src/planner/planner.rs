@@ -301,7 +301,7 @@ fn create_indexed_joins(
 pub struct CharacteristicInfo<'a, 'b> {
     id: usize,
     characteristic: Characteristic<'a, 'b>,
-    nlabel_ninfo_num_eqvs: BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize, usize)>>,
+    nlabel_ninfo_eqvs: BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize)>>,
 }
 
 impl<'a, 'b> CharacteristicInfo<'a, 'b> {
@@ -313,32 +313,30 @@ impl<'a, 'b> CharacteristicInfo<'a, 'b> {
         &self.characteristic
     }
 
-    pub fn nlabel_ninfo_num_eqvs(
-        &self,
-    ) -> &BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize, usize)>> {
-        &self.nlabel_ninfo_num_eqvs
+    pub fn nlabel_ninfo_eqvs(&self) -> &BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize)>> {
+        &self.nlabel_ninfo_eqvs
     }
 }
 
 // private methods.
 impl<'a, 'b> CharacteristicInfo<'a, 'b> {
     pub fn new(characteristic: Characteristic<'a, 'b>, id: usize) -> Self {
-        let mut nlabel_ninfo_num_eqvs: BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize, usize)>> =
+        let mut nlabel_ninfo_eqvs: BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize)>> =
             BTreeMap::new();
         characteristic
-            .info_nums()
+            .infos()
             .iter()
             .enumerate()
-            .for_each(|(i, (&ninfo, &num))| {
-                nlabel_ninfo_num_eqvs
+            .for_each(|(i, &ninfo)| {
+                nlabel_ninfo_eqvs
                     .entry(ninfo.vlabel())
                     .or_default()
-                    .push((ninfo, num, i + 1));
+                    .push((ninfo, i + 1));
             });
         Self {
             id,
             characteristic,
-            nlabel_ninfo_num_eqvs,
+            nlabel_ninfo_eqvs,
         }
     }
 }
@@ -376,10 +374,10 @@ impl<'a, 'b> StarInfo<'a, 'b> {
         let mut vertex_eqv: HashMap<VId, usize> = HashMap::new();
         vertex_eqv.insert(root, 0);
         let neighbor_info_offset: HashMap<&NeighborInfo, usize> = characteristic
-            .info_nums()
+            .infos()
             .iter()
             .enumerate()
-            .map(|(i, (&info, _))| (info, i + 1))
+            .map(|(i, &info)| (info, i + 1))
             .collect();
         for (&n, info) in pattern_graph.neighbors(root).unwrap() {
             vertex_eqv.insert(n, *neighbor_info_offset.get(info).unwrap());
@@ -617,10 +615,10 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
                         }
                     )?;
                 }
-                for ((&eqv, vertices), (&info, _)) in eqv_vertices
+                for ((&eqv, vertices), &info) in eqv_vertices
                     .iter()
                     .skip(1)
-                    .zip(star.characteristic().info_nums())
+                    .zip(star.characteristic().infos())
                 {
                     writeln!(
                         f,
@@ -674,7 +672,7 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
                             String::from("")
                         }
                     )?;
-                    for (i, (ninfo, _)) in cinfo.characteristic().info_nums().iter().enumerate() {
+                    for (i, ninfo) in cinfo.characteristic().infos().iter().enumerate() {
                         writeln!(
                             f,
                             "      eqv{} ({}){}{}",

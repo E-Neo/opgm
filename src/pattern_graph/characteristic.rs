@@ -2,7 +2,7 @@ use crate::{
     pattern_graph::{NeighborInfo, PatternGraph},
     types::{VId, VLabel, VertexConstraint},
 };
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 /// The characteristic of a star graph.
 ///
@@ -11,21 +11,21 @@ use std::collections::BTreeMap;
 pub struct Characteristic<'a, 'g> {
     root_vlabel: VLabel,
     root_constraint: Option<&'g VertexConstraint>,
-    info_nums: BTreeMap<&'a NeighborInfo<'g>, usize>,
+    infos: BTreeSet<&'a NeighborInfo<'g>>,
 }
 
 impl<'a, 'g> Characteristic<'a, 'g> {
     pub fn new(pattern_graph: &'a PatternGraph<'g>, root: VId) -> Self {
         let root_vlabel = pattern_graph.vlabel(root).unwrap();
         let root_constraint = pattern_graph.vertex_constraint(root).unwrap();
-        let mut info_nums: BTreeMap<_, usize> = BTreeMap::new();
+        let mut infos: BTreeSet<_> = BTreeSet::new();
         for (_, info) in pattern_graph.neighbors(root).unwrap() {
-            *info_nums.entry(info).or_default() += 1;
+            infos.insert(info);
         }
         Self {
             root_vlabel,
             root_constraint,
-            info_nums,
+            infos,
         }
     }
 
@@ -37,7 +37,7 @@ impl<'a, 'g> Characteristic<'a, 'g> {
         self.root_constraint
     }
 
-    pub fn info_nums(&self) -> &BTreeMap<&'a NeighborInfo<'g>, usize> {
-        &self.info_nums
+    pub fn infos(&self) -> &BTreeSet<&'a NeighborInfo<'g>> {
+        &self.infos
     }
 }

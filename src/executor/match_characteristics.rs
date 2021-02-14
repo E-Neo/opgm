@@ -120,22 +120,16 @@ fn match_data_vertex_for_one_info(
     let mut num_vids = 0;
     let &mut (sr_pos, idx_pos) = sr_pos_idx_pos;
     if let Some(mut pos_lens) = allocate(super_row_mm, sr_pos, vertex, info) {
-        let (mut left_iter, mut right_iter) =
-            (vertex.vlabels(), info.nlabel_ninfo_num_eqvs().iter());
+        let (mut left_iter, mut right_iter) = (vertex.vlabels(), info.nlabel_ninfo_eqvs().iter());
         let (mut left, mut right) = (left_iter.next(), right_iter.next());
-        while let (Some((x, _, neighbors)), Some((y, ninfo_num_eqvs))) = (left, right) {
+        while let (Some((x, _, neighbors)), Some((y, ninfo_eqvs))) = (left, right) {
             match x.cmp(y) {
                 Ordering::Less => {
                     left = left_iter.next();
                 }
                 Ordering::Equal => {
-                    let num_wrote = match_neighbors(
-                        super_row_mm,
-                        &mut pos_lens,
-                        vertex,
-                        neighbors,
-                        ninfo_num_eqvs,
-                    );
+                    let num_wrote =
+                        match_neighbors(super_row_mm, &mut pos_lens, vertex, neighbors, ninfo_eqvs);
                     if num_wrote == 0 {
                         return 0;
                     }
@@ -166,10 +160,10 @@ fn match_neighbors<'a, N: IntoIterator<Item = DataNeighbor<'a>>>(
     pos_lens: &mut [(usize, usize)],
     vertex: &DataVertex,
     neighbors: N,
-    ninfo_num_eqvs: &[(&NeighborInfo, usize, usize)],
+    ninfo_eqvs: &[(&NeighborInfo, usize)],
 ) -> usize {
     for neighbor in neighbors {
-        for &(ninfo, _, eqv) in ninfo_num_eqvs {
+        for &(ninfo, eqv) in ninfo_eqvs {
             if check_neighbor_constraints(vertex, &neighbor, ninfo)
                 && check_neighbor_degrees(&neighbor, ninfo)
                 && check_neighbor_edges(&neighbor, ninfo)
@@ -183,7 +177,7 @@ fn match_neighbors<'a, N: IntoIterator<Item = DataNeighbor<'a>>>(
         }
     }
     let mut num_vids = 0;
-    for &(_, _, eqv) in ninfo_num_eqvs {
+    for &(_, eqv) in ninfo_eqvs {
         let (_, len) = pos_lens[eqv];
         if len == 0 {
             return 0;
@@ -203,20 +197,20 @@ fn allocate(
 ) -> Option<Vec<(usize, usize)>> {
     let mut pos = sr_pos
         + size_of::<usize>()
-        + (1 + info.characteristic().info_nums().len()) * size_of::<PosLen>();
-    let mut pos_lens = vec![(0, 0); info.characteristic().info_nums().len() + 1];
+        + (1 + info.characteristic().infos().len()) * size_of::<PosLen>();
+    let mut pos_lens = vec![(0, 0); info.characteristic().infos().len() + 1];
     pos_lens[0] = (pos, 1);
     pos += size_of::<VId>();
     let mut left_iter = vertex.vlabels();
-    let mut right_iter = info.nlabel_ninfo_num_eqvs().iter();
+    let mut right_iter = info.nlabel_ninfo_eqvs().iter();
     let (mut left, mut right) = (left_iter.next(), right_iter.next());
-    while let (Some((x, xlen, _)), Some((y, ninfo_num_eqvs))) = (left, right) {
+    while let (Some((x, xlen, _)), Some((y, ninfo_eqvs))) = (left, right) {
         match x.cmp(y) {
             Ordering::Less => {
                 left = left_iter.next();
             }
             Ordering::Equal => {
-                for &(_, _, eqv) in ninfo_num_eqvs {
+                for &(_, eqv) in ninfo_eqvs {
                     pos_lens[eqv].0 = pos;
                     pos += xlen * size_of::<VId>();
                 }
@@ -302,7 +296,7 @@ fn finish_results(
         write_super_row_header(
             &mut super_row_mms[info.id()],
             idx_pos / size_of::<VIdPos>(),
-            info.characteristic().info_nums().len() + 1,
+            info.characteristic().infos().len() + 1,
             num_vertices[info.id()],
         );
         super_row_mms[info.id()].resize(sr_pos);
