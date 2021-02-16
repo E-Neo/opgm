@@ -211,12 +211,20 @@ fn handle_plan(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     let query = std::fs::read_to_string(matches.value_of("QUERY").unwrap())?;
     let (pattern_graph, vc_info, ec_info, gcs) =
         compile(&query).map_err(|e| Err::CompileError(e.to_string()))?;
-    println!(
-        "{}",
-        Task::new(&data_graph, pattern_graph, &vc_info, &ec_info, gcs)
-            .prepare()
-            .plan()
-    );
+    let mut task = Task::new(&data_graph, pattern_graph, &vc_info, &ec_info, gcs);
+    let plan = task.prepare().plan();
+    if matches.is_present("roots") {
+        println!(
+            "{}",
+            plan.stars()
+                .iter()
+                .map(|star| star.root().to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    } else {
+        println!("{}", plan);
+    }
     Ok(())
 }
 
@@ -382,7 +390,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             SubCommand::with_name("plan")
                 .about("Displays graph matching plan")
                 .arg(Arg::with_name("DATAGRAPH").required(true))
-                .arg(Arg::with_name("QUERY").required(true)),
+                .arg(Arg::with_name("QUERY").required(true))
+                .arg(Arg::with_name("roots").long("roots").takes_value(false)),
         )
         .subcommand(
             SubCommand::with_name("srinfo")
