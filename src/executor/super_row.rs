@@ -146,6 +146,11 @@ impl<'a> SuperRows<'a> {
     pub fn num_rows(&self) -> usize {
         self.num_rows
     }
+
+
+    pub fn num_eqvs(&self)->usize{
+        self.num_eqvs
+    }
 }
 
 impl<'a> Iterator for SuperRows<'a> {

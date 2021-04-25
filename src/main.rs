@@ -97,7 +97,7 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
                 .collect(),
         );
     }
-    let plan = planner.plan();
+    let mut plan = planner.plan();
     eprintln!(
         "star_root_ids: {:?}",
         plan.stars()
@@ -117,7 +117,7 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         (std::time::Instant::now() - time_now).as_millis()
     );
     if matches.is_present("count-srs") {
-        handle_match_count_srs(&plan, &super_row_mms, &index_mms)?;
+        handle_match_count_srs(&mut plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("count-rows") {
         handle_match_count_rows(&plan, &super_row_mms, &index_mms)?;
     } else if matches.is_present("count-rows-slow") {
@@ -133,7 +133,7 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
 }
 
 fn handle_match_count_srs(
-    plan: &Plan,
+    plan: &mut Plan,
     super_row_mms: &[MemoryManager],
     index_mms: &[MemoryManager],
 ) -> std::io::Result<()> {
@@ -141,6 +141,7 @@ fn handle_match_count_srs(
         0
     } else if let Some(srs) = plan.execute_join_plan(&super_row_mms, &index_mms) {
         let time_now = std::time::Instant::now();
+
         let num_rows = srs.count();
         eprintln!(
             "join_time: {}",
@@ -150,7 +151,9 @@ fn handle_match_count_srs(
     } else {
         SuperRows::new(super_row_mms.last().unwrap()).num_rows()
     };
+
     eprintln!("num_srs: {}", num_srs);
+    
     Ok(())
 }
 
@@ -330,7 +333,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .help("Prefix memory mapped files with this directory")
                         .long("directory")
                         .takes_value(true)
-                        .default_value("/tmp")
+                        .default_value("./tmp")
                         .required_ifs(&[
                             ("star-mm-type", "mmap"),
                             ("join-mm-type", "mmap"),

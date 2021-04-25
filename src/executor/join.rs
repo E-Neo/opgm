@@ -303,12 +303,11 @@ impl Iterator for JoinedSuperRowIter {
         }
     }
 }
-
 pub struct JoinedSuperRows<'a, 'b> {
     indices: Vec<Index<'a>>,
     plan: &'b JoinPlan,
     top_scan: SuperRows<'a>,
-    srs: Vec<SuperRow<'a>>,
+    srs: Vec<(usize, SuperRow<'a>)>,// (star id, super row)
     vc: Vec<VId>,
     scans: Vec<Intersection<'a>>,
 }
@@ -328,7 +327,7 @@ impl<'a, 'b> JoinedSuperRows<'a, 'b> {
                 })
                 .collect(),
             plan,
-            top_scan: SuperRows::new(&super_row_mms[0]),
+            top_scan: SuperRows::new(&super_row_mms[plan.indexed_joins()[0].index_id()]),
             srs: Vec::with_capacity(plan.num_cover()),
             vc: Vec::with_capacity(plan.num_cover()),
             scans: Vec::with_capacity(plan.num_cover()),
@@ -344,22 +343,31 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
             if self.vc.is_empty() {
                 if let Some(sr0) = self.top_scan.next() {
                     let v1 = sr0.images()[0][0];
-                    self.srs.push(sr0);
+                    self.srs.push((self.plan.indexed_joins()[0].index_id() ,sr0));
                     self.vc.push(v1);
                     self.scans.push(Intersection::new(
-                        self.plan.indexed_joins()[0]
+                        self.plan.indexed_joins()[1]
                             .scan()
                             .iter()
-                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv])
+                            .map(|&(sr, eqv)| {
+                                //find the star id in self.srs
+                                if let Some(sc) = self.srs.iter().find(|&(star, _)| *star == sr)  
+                                {
+                                    sc.1.images()[eqv]
+                                }
+                                else{
+                                    self.srs[0].1.images()[eqv]
+                                }
+                            })
                             .collect(),
                     ));
                 } else {
                     return None;
                 }
             } else if let Some(v1) = self.scans.last_mut().and_then(|x| x.next()) {
-                let indexed_join = &self.plan.indexed_joins()[self.vc.len() - 1];
+                let indexed_join = &self.plan.indexed_joins()[self.vc.len()];
                 if let Some(sr1) = self.indices[indexed_join.index_id()].get(v1) {
-                    self.srs.push(sr1);
+                    self.srs.push((indexed_join.index_id() , sr1));
                     self.vc.push(v1);
                     if self.vc.len() == self.plan.num_cover() {
                         let emit = JoinedSuperRow::new(
@@ -371,7 +379,16 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
                                     Intersection::new(
                                         x.intersection()
                                             .iter()
-                                            .map(|&(sr, eqv)| self.srs[sr].images()[eqv])
+                                            .map(|&(sr, eqv)| {
+                                                if let Some(sc) = self.srs.iter().find(|&(star, _)| *star == sr)  
+                                                {
+                                                    sc.1.images()[eqv]
+                                                }
+                                                else{
+                                                    self.srs[0].1.images()[eqv]
+
+                                                }
+                                            })
                                             .collect(),
                                     )
                                 })
@@ -382,10 +399,18 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
                         return Some(emit);
                     } else {
                         self.scans.push(Intersection::new(
-                            self.plan.indexed_joins()[self.vc.len() - 1]
+                            self.plan.indexed_joins()[self.vc.len()]
                                 .scan()
                                 .iter()
-                                .map(|&(sr, eqv)| self.srs[sr].images()[eqv])
+                                .map(|&(sr, eqv)| {
+                                    if let Some(sc) = self.srs.iter().find(|&(star, _)| *star == sr)  
+                                    {
+                                        sc.1.images()[eqv]
+                                    }
+                                    else{
+                                        self.srs[0].1.images()[eqv]
+                                    }
+                                })
                                 .collect(),
                         ));
                     }
@@ -402,10 +427,91 @@ impl<'a, 'b> Iterator for JoinedSuperRows<'a, 'b> {
 pub fn join<'a, 'b>(
     super_row_mms: &'a [MemoryManager],
     index_mms: &'a [MemoryManager],
-    plan: &'b JoinPlan,
+    plan: &'b mut JoinPlan,
+    stars: &[VId],
 ) -> JoinedSuperRows<'a, 'b> {
+    
+    reorder_join_plan(super_row_mms, plan, stars);
     JoinedSuperRows::new(super_row_mms, index_mms, plan)
 }
+
+#[derive(Debug, PartialEq)]
+pub struct OrderIndexedJoinPlan {
+    index_id: usize,//star id
+    value: usize,
+    root: VId,
+}
+
+impl OrderIndexedJoinPlan {
+    pub fn new(index_id: usize, value : usize, root:VId) -> Self {
+        Self { index_id, value, root }
+    }
+
+
+    pub fn index_id(&self) -> usize {
+        self.index_id
+    }
+
+    pub fn value(&self) -> usize {
+        self.value
+    }
+
+    pub fn root(&self) -> VId {
+        self.root
+    }
+}
+//calculate reorder value by rows
+fn reorder_value(srs: &mut SuperRows) -> usize{
+    let rows = srs.num_rows();
+    let mut total_image_size : usize = 0;
+    //every super row
+    srs.for_each(|sr| {
+        sr.images().iter().for_each(|vids| total_image_size+=(**vids).len());
+    });
+    let avg_image_size = total_image_size/srs.num_eqvs();
+    println!("value:{} ", &(rows + avg_image_size));
+
+    rows + avg_image_size
+}
+//reorder join_plan's index
+fn reorder_join_plan<'a, 'b> (
+    super_row_mms: &'a [MemoryManager],
+    
+    plan: &'b mut   JoinPlan,
+    stars: &[VId],
+){
+    let mut to_order_indexed: Vec<OrderIndexedJoinPlan> = Vec::with_capacity(plan.indexed_joins().len());
+    let mut srs = SuperRows::new(&super_row_mms[0]);
+    let value = reorder_value(&mut srs);
+
+    to_order_indexed.insert(0, OrderIndexedJoinPlan::new(0, value, stars[0]));
+    plan.indexed_joins().iter().for_each(|index_plan| {
+        let mut srs = SuperRows::new(&super_row_mms[index_plan.index_id()]);
+        let value = reorder_value(&mut srs);
+        to_order_indexed.insert(0, OrderIndexedJoinPlan::new(index_plan.index_id(), value, stars[index_plan.index_id()]));
+    });
+    to_order_indexed.sort_by(|a, b| a.value().cmp(&b.value()));// Descending b cmp a, Ascending a cmp b
+    //checked index_id of to_order_indexed 
+    let mut prev_index : Vec<usize> = Vec::new();
+    let ordered_indexed :Vec<IndexedJoinPlan> = to_order_indexed.iter().map(|index| {
+
+        let indexed_join_plan = IndexedJoinPlan::new(
+        plan.uid_sr_eqvs()
+            .get(&index.root())
+            .unwrap()
+            .iter()
+            .filter_map(|&(sr, eqv)| if prev_index.contains(&sr) { Some((sr, eqv)) } else { None })
+            .collect(),
+            index.index_id(),
+            );
+        prev_index.push(index.index_id());
+        indexed_join_plan
+    }
+        // IndexedJoinPlan::new(index.scan().clone().to_vec(),  index.index_id().clone())
+    ).collect();
+    plan.set_indexed_joins(ordered_indexed);
+}
+
 
 #[cfg(test)]
 mod tests {

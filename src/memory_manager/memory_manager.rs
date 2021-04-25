@@ -33,6 +33,7 @@ pub struct MmapFile {
 
 impl MmapFile {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        println!("{} ", path.as_ref().display());
         let file = OpenOptions::new()
             .read(true)
             .write(true)

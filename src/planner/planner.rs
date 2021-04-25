@@ -205,16 +205,32 @@ fn create_join_plan(
     if stars.len() < 2 {
         None
     } else {
+        //VId: pattern_graph vertex id
+        //BTreeSet<(usize, usize): first usize is star id , second usize is this vertex's id in this star 
         let mut uid_sr_eqvs: HashMap<VId, BTreeSet<(usize, usize)>> = HashMap::new();
         for (star_id, star) in stars.iter().enumerate() {
             for (&uid, &eqv) in star.vertex_eqv() {
                 uid_sr_eqvs.entry(uid).or_default().insert((star_id, eqv));
             }
         }
+
+
         let leaves = get_leaves(pattern_graph, stars);
         let vertex_eqv = create_vertex_eqv(stars, &leaves, &uid_sr_eqvs);
+        println!("vertex_eqv:[");
+        for (eqv, id) in & vertex_eqv{
+            println!("{}: {}", eqv, id);
+        }
+        println!("]");
         let eqv_pivots: BTreeMap<usize, VId> =
             vertex_eqv.iter().map(|(&uid, &eqv)| (eqv, uid)).collect();
+        
+        println!("eqv_pivots:[");
+        for (eqv, id) in & eqv_pivots{
+            println!("{}: {}", eqv, id);
+        }
+        println!("]");
+    
         Some(JoinPlan::new(
             vertex_eqv,
             stars.len(),
@@ -229,6 +245,7 @@ fn create_join_plan(
                     )
                 })
                 .collect(),
+                uid_sr_eqvs,
         ))
     }
 }
@@ -263,6 +280,8 @@ fn create_vertex_eqv(
         .collect();
     let mut eqv = stars.len();
     let mut visited = HashSet::new();
+    //if some leaves is eqv in all star (they have same BTree<(usize,usize)>),
+    //these leaves have same eqv in vertex_eqv
     for leaf in leaves {
         if !visited.contains(leaf) {
             for &uid in sr_eqvs_leaves.get(uid_sr_eqvs.get(leaf).unwrap()).unwrap() {
@@ -279,10 +298,11 @@ fn create_indexed_joins(
     stars: &[StarInfo],
     uid_sr_eqvs: &HashMap<VId, BTreeSet<(usize, usize)>>,
 ) -> Vec<IndexedJoinPlan> {
+
     stars
         .iter()
         .enumerate()
-        .skip(1)
+        .skip(1) //TODO No longer skip the first star, because the join order will change.Join operation will not start from the first star by default 
         .map(|(i, star)| {
             IndexedJoinPlan::new(
                 uid_sr_eqvs
@@ -292,6 +312,7 @@ fn create_indexed_joins(
                     .filter_map(|&(sr, eqv)| if sr < i { Some((sr, eqv)) } else { None })
                     .collect(),
                 star.id(),
+                
             )
         })
         .collect()
@@ -391,10 +412,11 @@ impl<'a, 'b> StarInfo<'a, 'b> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+//
+#[derive(Debug, PartialEq, Clone)]
 pub struct IndexedJoinPlan {
     scan: Vec<(usize, usize)>, // (sr, eqv)
-    index_id: usize,
+    index_id: usize,//star id
 }
 
 impl IndexedJoinPlan {
@@ -409,9 +431,10 @@ impl IndexedJoinPlan {
     pub fn index_id(&self) -> usize {
         self.index_id
     }
+
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct IntersectionPlan {
     intersection: Vec<(usize, usize)>, // (sr, eqv)
 }
@@ -426,6 +449,7 @@ impl IntersectionPlan {
     }
 }
 
+#[derive(Clone)]
 pub struct JoinPlan {
     vertex_eqv: HashMap<VId, usize>,
     sorted_vertex_eqv: Vec<(VId, usize)>,
@@ -433,6 +457,7 @@ pub struct JoinPlan {
     index_type: IndexType,
     indexed_joins: Vec<IndexedJoinPlan>,
     intersections: Vec<IntersectionPlan>,
+    uid_sr_eqvs: HashMap<VId, BTreeSet<(usize, usize)>>,
 }
 
 impl JoinPlan {
@@ -442,6 +467,7 @@ impl JoinPlan {
         index_type: IndexType,
         indexed_joins: Vec<IndexedJoinPlan>,
         intersections: Vec<IntersectionPlan>,
+        uid_sr_eqvs: HashMap<VId, BTreeSet<(usize, usize)>>,
     ) -> Self {
         let mut sorted_vertex_eqv: Vec<_> =
             vertex_eqv.iter().map(|(&uid, &eqv)| (uid, eqv)).collect();
@@ -453,6 +479,7 @@ impl JoinPlan {
             index_type,
             indexed_joins,
             intersections,
+            uid_sr_eqvs,
         }
     }
 
@@ -478,6 +505,15 @@ impl JoinPlan {
 
     pub fn intersections(&self) -> &[IntersectionPlan] {
         &self.intersections
+    }
+
+    pub fn uid_sr_eqvs(&self)-> &HashMap<VId, BTreeSet<(usize, usize)>>{
+        &self.uid_sr_eqvs
+    }
+
+    //set new indexed joins
+    pub fn set_indexed_joins(&mut self, indexed: Vec<IndexedJoinPlan>){
+        self.indexed_joins = indexed;
     }
 }
 
@@ -510,6 +546,7 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     pub fn stars(&self) -> &[StarInfo<'a, 'b>] {
         &self.stars
     }
+    
 
     /// Returns the stars matching plan.
     ///
@@ -523,6 +560,11 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     pub fn join_plan(&self) -> Option<&JoinPlan> {
         self.join_plan.as_ref()
     }
+
+    pub fn join_plan_mutable(&mut self) -> Option<&mut JoinPlan> {
+        self.join_plan.as_mut()
+    }
+
 
     pub fn global_constraint(&self) -> &Option<GlobalConstraint> {
         &self.global_constraint
@@ -554,12 +596,19 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
     }
 
     pub fn execute_join_plan<'s, 'm>(
-        &'s self,
+        &'s mut self,
         super_row_mms: &'m [MemoryManager],
         index_mms: &'m [MemoryManager],
+
     ) -> Option<JoinedSuperRows<'m, 's>> {
-        self.join_plan()
-            .map(|join_plan| join(super_row_mms, index_mms, join_plan))
+        let star_roots: Vec<VId> = self.stars().iter().map(|star| star.root()).collect();
+
+        self.join_plan_mutable()
+            .map(|join_plan| {
+                join(super_row_mms, index_mms,  join_plan, &star_roots)
+            })
+
+
     }
 }
 
@@ -871,7 +920,7 @@ mod tests {
         assert_eq!(
             join_plan.indexed_joins(),
             vec![
-                IndexedJoinPlan::new(vec![(0, 1)], 1),
+                IndexedJoinPlan::new(vec![(0, 1)], 1 ),
                 IndexedJoinPlan::new(vec![(0, 1), (1, 1)], 2)
             ]
         );
