@@ -7,7 +7,7 @@ use crate::{
     },
     data_graph::DataGraph,
     executor::{join, match_characteristics, read_super_row_header, JoinedSuperRows},
-    memory_manager::{MemoryManager, MmapFile},
+    memory_manager::{MemoryManager, MmapMutFile},
     pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
     planner::decompose_stars,
     types::{GlobalConstraint, VId, VLabel},
@@ -569,9 +569,9 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
         (0..count)
             .map(|id| match &self.star_sr_mm_type {
                 MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
-                MemoryManagerType::Mmap(path, name) => {
-                    MemoryManager::Mmap(MmapFile::new(path.join(format!("{}{}.sr", name, id))))
-                }
+                MemoryManagerType::Mmap(path, name) => MemoryManager::MmapMut(MmapMutFile::new(
+                    path.join(format!("{}{}.sr", name, id)),
+                )),
                 MemoryManagerType::Sink => MemoryManager::Sink,
             })
             .collect()
@@ -581,9 +581,9 @@ impl<'a, 'b, 'c> Plan<'a, 'b, 'c> {
         (0..count)
             .map(|id| match &self.index_mm_type {
                 MemoryManagerType::Mem => MemoryManager::Mem(vec![]),
-                MemoryManagerType::Mmap(path, name) => {
-                    MemoryManager::Mmap(MmapFile::new(path.join(format!("{}{}.idx", name, id))))
-                }
+                MemoryManagerType::Mmap(path, name) => MemoryManager::MmapMut(MmapMutFile::new(
+                    path.join(format!("{}{}.idx", name, id)),
+                )),
                 MemoryManagerType::Sink => MemoryManager::Sink,
             })
             .collect()

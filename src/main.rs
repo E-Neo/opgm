@@ -7,7 +7,7 @@ use opgm::{
     compiler::compiler::compile,
     data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
     executor::{count_rows, count_rows_slow, enumerate, SuperRows, SuperRowsInfo},
-    memory_manager::{MemoryManager, MmapFile, MmapReadOnlyFile},
+    memory_manager::{MemoryManager, MmapFile, MmapMutFile},
     planner::{IndexType, MemoryManagerType, Plan, Task},
     types::VId,
 };
@@ -26,16 +26,16 @@ enum Err {
 impl std::error::Error for Err {}
 
 fn handle_createdb(matches: &ArgMatches) -> Result<(), sqlite::Error> {
-    let mut mm = MemoryManager::Mmap(MmapFile::new(matches.value_of("DATAGRAPH").unwrap()));
+    let mut mm = MemoryManager::MmapMut(MmapMutFile::new(matches.value_of("DATAGRAPH").unwrap()));
     mm_read_sqlite3(&mut mm, matches.value_of("SQLITE3").unwrap())
 }
 
 fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
     println!(
         "{}",
-        DataGraphInfo::new(&DataGraph::new(MemoryManager::MmapReadOnly(
-            MmapReadOnlyFile::from_file(&File::open(matches.value_of("DATAGRAPH").unwrap())?)
-        )))
+        DataGraphInfo::new(&DataGraph::new(MemoryManager::Mmap(MmapFile::from_file(
+            &File::open(matches.value_of("DATAGRAPH").unwrap())?
+        ))))
     );
     Ok(())
 }
@@ -43,17 +43,17 @@ fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
 fn handle_displaydb(matches: &ArgMatches) -> std::io::Result<()> {
     println!(
         "{}",
-        DataGraph::new(MemoryManager::MmapReadOnly(MmapReadOnlyFile::from_file(
-            &File::open(matches.value_of("DATAGRAPH").unwrap())?
-        )))
+        DataGraph::new(MemoryManager::Mmap(MmapFile::from_file(&File::open(
+            matches.value_of("DATAGRAPH").unwrap()
+        )?)))
     );
     Ok(())
 }
 
 fn handle_displaysr(matches: &ArgMatches) -> std::io::Result<()> {
-    for (i, sr) in SuperRows::new(&MemoryManager::MmapReadOnly(MmapReadOnlyFile::from_file(
-        &File::open(matches.value_of("SRFILE").unwrap())?,
-    )))
+    for (i, sr) in SuperRows::new(&MemoryManager::Mmap(MmapFile::from_file(&File::open(
+        matches.value_of("SRFILE").unwrap(),
+    )?)))
     .enumerate()
     {
         println!("{}: {}", i, sr);
@@ -69,7 +69,7 @@ fn handle_match(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         file.read_to_end(&mut buffer)?;
         MemoryManager::Mem(buffer)
     } else {
-        MemoryManager::MmapReadOnly(MmapReadOnlyFile::from_file(&file))
+        MemoryManager::Mmap(MmapFile::from_file(&file))
     });
     let query = std::fs::read_to_string(matches.value_of("QUERY").unwrap())?;
     let (pattern_graph, vc_info, ec_info, gcs) =
@@ -205,9 +205,9 @@ fn handle_match_to_stdout(
 }
 
 fn handle_plan(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
-    let data_graph = DataGraph::new(MemoryManager::MmapReadOnly(MmapReadOnlyFile::from_file(
-        &File::open(matches.value_of("DATAGRAPH").unwrap())?,
-    )));
+    let data_graph = DataGraph::new(MemoryManager::Mmap(MmapFile::from_file(&File::open(
+        matches.value_of("DATAGRAPH").unwrap(),
+    )?)));
     let query = std::fs::read_to_string(matches.value_of("QUERY").unwrap())?;
     let (pattern_graph, vc_info, ec_info, gcs) =
         compile(&query).map_err(|e| Err::CompileError(e.to_string()))?;
@@ -229,7 +229,7 @@ fn handle_plan(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
 }
 
 fn handle_srinfo(matches: &ArgMatches) -> std::io::Result<()> {
-    let srfile = MemoryManager::MmapReadOnly(MmapReadOnlyFile::from_file(&File::open(
+    let srfile = MemoryManager::Mmap(MmapFile::from_file(&File::open(
         matches.value_of("SRFILE").unwrap(),
     )?));
     println!("{}", SuperRowsInfo::new(&srfile));

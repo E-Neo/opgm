@@ -3,12 +3,12 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 /// A read-only memory mapped file.
-pub struct MmapReadOnlyFile {
+pub struct MmapFile {
     mmap: Mmap,
     len: u64,
 }
 
-impl MmapReadOnlyFile {
+impl MmapFile {
     pub fn from_file(file: &File) -> Self {
         let len = file.metadata().unwrap().len();
         let mmap = unsafe { Mmap::map(&file) }.unwrap();
@@ -25,13 +25,13 @@ impl MmapReadOnlyFile {
 }
 
 /// A memory mapped file.
-pub struct MmapFile {
+pub struct MmapMutFile {
     file: File,
     mmap: MmapMut,
     len: u64,
 }
 
-impl MmapFile {
+impl MmapMutFile {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
         let file = OpenOptions::new()
             .read(true)
@@ -87,9 +87,9 @@ pub enum MemoryManager {
     /// A memory buffer.
     Mem(Vec<u8>),
     /// A read-only memory mapped buffer.
-    MmapReadOnly(MmapReadOnlyFile),
-    /// A memory mapped buffer.
     Mmap(MmapFile),
+    /// A memory mapped buffer.
+    MmapMut(MmapMutFile),
     /// A sink.
     Sink,
 }
@@ -98,8 +98,8 @@ impl MemoryManager {
     pub fn len(&self) -> usize {
         match self {
             MemoryManager::Mem(vec) => vec.len(),
-            MemoryManager::MmapReadOnly(mmapfile) => mmapfile.len(),
             MemoryManager::Mmap(mmapfile) => mmapfile.len(),
+            MemoryManager::MmapMut(mmapfile) => mmapfile.len(),
             MemoryManager::Sink => 0,
         }
     }
@@ -107,8 +107,8 @@ impl MemoryManager {
     pub fn resize(&mut self, new_len: usize) {
         match self {
             MemoryManager::Mem(vec) => vec.resize(new_len, 0),
-            MemoryManager::MmapReadOnly(_) => panic!("Cannot resize read only file"),
-            MemoryManager::Mmap(mmapfile) => mmapfile.resize(new_len),
+            MemoryManager::Mmap(_) => panic!("Cannot resize read only file"),
+            MemoryManager::MmapMut(mmapfile) => mmapfile.resize(new_len),
             MemoryManager::Sink => (),
         }
     }
@@ -116,8 +116,8 @@ impl MemoryManager {
     pub fn read<T>(&self, pos: usize) -> *const T {
         match self {
             MemoryManager::Mem(vec) => unsafe { vec.as_ptr().add(pos) as *const T },
-            MemoryManager::MmapReadOnly(mmapfile) => mmapfile.read(pos),
             MemoryManager::Mmap(mmapfile) => mmapfile.read(pos),
+            MemoryManager::MmapMut(mmapfile) => mmapfile.read(pos),
             MemoryManager::Sink => std::ptr::null(),
         }
     }
@@ -127,10 +127,10 @@ impl MemoryManager {
             MemoryManager::Mem(vec) => unsafe {
                 std::slice::from_raw_parts(vec.as_ptr().add(pos) as *const T, count)
             },
-            MemoryManager::MmapReadOnly(mmapfile) => unsafe {
+            MemoryManager::Mmap(mmapfile) => unsafe {
                 std::slice::from_raw_parts(mmapfile.read(pos), count)
             },
-            MemoryManager::Mmap(mmapfile) => unsafe {
+            MemoryManager::MmapMut(mmapfile) => unsafe {
                 std::slice::from_raw_parts(mmapfile.read(pos), count)
             },
             MemoryManager::Sink => &[],
@@ -142,8 +142,8 @@ impl MemoryManager {
             MemoryManager::Mem(vec) => unsafe {
                 std::ptr::copy(data, vec.as_mut_ptr().add(pos) as *mut T, count)
             },
-            MemoryManager::MmapReadOnly(_) => panic!("Cannot write read-only file"),
-            MemoryManager::Mmap(mmapfile) => mmapfile.write(pos, data, count),
+            MemoryManager::Mmap(_) => panic!("Cannot write read-only file"),
+            MemoryManager::MmapMut(mmapfile) => mmapfile.write(pos, data, count),
             MemoryManager::Sink => (),
         }
     }
@@ -191,14 +191,14 @@ mod tests {
     fn new_mmap_mm() -> MemoryManager {
         let mut file = tempfile::tempfile().unwrap();
         file.write(&[1, 2, 3, 4, 5, 6]).unwrap();
-        let mmapfile = MmapFile::from_file(file);
-        MemoryManager::Mmap(mmapfile)
+        let mmapfile = MmapMutFile::from_file(file);
+        MemoryManager::MmapMut(mmapfile)
     }
 
     fn new_empty_mmap_mm() -> MemoryManager {
         let file = tempfile::tempfile().unwrap();
-        let mmapfile = MmapFile::from_file(file);
-        MemoryManager::Mmap(mmapfile)
+        let mmapfile = MmapMutFile::from_file(file);
+        MemoryManager::MmapMut(mmapfile)
     }
 
     #[test]

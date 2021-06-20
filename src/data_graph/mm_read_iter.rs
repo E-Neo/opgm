@@ -1,5 +1,5 @@
 use crate::{
-    memory_manager::{MemoryManager, MmapFile},
+    memory_manager::{MemoryManager, MmapMutFile},
     types::{ELabel, NeighborHeader, VId, VLabel, VLabelPosLen, VertexHeader},
 };
 use itertools::Itertools;
@@ -10,14 +10,14 @@ type Edge = (VId, VId, ELabel);
 type EdgeWithVLabel = (VLabel, VId, VLabel, VId, ELabel);
 type InfoEdge = (VLabel, VId, VLabel, VId, bool, ELabel);
 
-fn create_vertices_mmap<V>(num_vertices: usize, vertices: V) -> MmapFile
+fn create_vertices_mmap<V>(num_vertices: usize, vertices: V) -> MmapMutFile
 where
     V: IntoIterator<Item = Vertex>,
 {
     let file = tempfile::tempfile().unwrap();
     file.set_len((size_of::<Vertex>() * num_vertices) as u64)
         .unwrap();
-    let mut mm = MmapFile::from_file(file);
+    let mut mm = MmapMutFile::from_file(file);
     for (i, vertex) in vertices.into_iter().enumerate() {
         unsafe {
             *((mm.as_mut_ptr() as *mut Vertex).add(i)) = vertex;
@@ -29,7 +29,7 @@ where
     mm
 }
 
-fn create_vertices_index(mm: &MmapFile) -> &[Vertex] {
+fn create_vertices_index(mm: &MmapMutFile) -> &[Vertex] {
     unsafe {
         std::slice::from_raw_parts(mm.as_ptr() as *const Vertex, mm.len() / size_of::<Vertex>())
     }
@@ -47,14 +47,14 @@ fn create_edges_with_vlabel_mmap<E>(
     vertices_index: &[Vertex],
     num_edges: usize,
     edges: E,
-) -> MmapFile
+) -> MmapMutFile
 where
     E: IntoIterator<Item = Edge>,
 {
     let file = tempfile::tempfile().unwrap();
     file.set_len((size_of::<EdgeWithVLabel>() * num_edges) as u64)
         .unwrap();
-    let mut mm = MmapFile::from_file(file);
+    let mut mm = MmapMutFile::from_file(file);
     for (i, (src_vid, dst_vid, elabel)) in edges.into_iter().enumerate() {
         unsafe {
             *((mm.as_mut_ptr() as *mut EdgeWithVLabel).add(i)) = (
@@ -69,7 +69,7 @@ where
     mm
 }
 
-fn create_edges_with_vlabel(mm: &MmapFile) -> &[EdgeWithVLabel] {
+fn create_edges_with_vlabel(mm: &MmapMutFile) -> &[EdgeWithVLabel] {
     unsafe {
         std::slice::from_raw_parts(
             mm.as_ptr() as *const EdgeWithVLabel,
@@ -78,7 +78,7 @@ fn create_edges_with_vlabel(mm: &MmapFile) -> &[EdgeWithVLabel] {
     }
 }
 
-fn create_edges_with_vlabel_mut(mm: &mut MmapFile) -> &mut [EdgeWithVLabel] {
+fn create_edges_with_vlabel_mut(mm: &mut MmapMutFile) -> &mut [EdgeWithVLabel] {
     unsafe {
         std::slice::from_raw_parts_mut(
             mm.as_mut_ptr() as *mut EdgeWithVLabel,
@@ -87,10 +87,10 @@ fn create_edges_with_vlabel_mut(mm: &mut MmapFile) -> &mut [EdgeWithVLabel] {
     }
 }
 
-fn copy_mmapfile(mm: &MmapFile) -> MmapFile {
+fn copy_mmapfile(mm: &MmapMutFile) -> MmapMutFile {
     let file = tempfile::tempfile().unwrap();
     file.set_len(mm.len() as u64).unwrap();
-    let mut new_mm = MmapFile::from_file(file);
+    let mut new_mm = MmapMutFile::from_file(file);
     unsafe {
         std::ptr::copy(mm.as_ptr(), new_mm.as_mut_ptr(), new_mm.len());
     }
@@ -101,7 +101,7 @@ fn create_in_out_edges_mmap<E>(
     vertices_index: &[Vertex],
     num_edges: usize,
     edges: E,
-) -> (MmapFile, MmapFile)
+) -> (MmapMutFile, MmapMutFile)
 where
     E: IntoIterator<Item = Edge>,
 {
@@ -124,7 +124,7 @@ fn create_info_edges_mmap<V, E>(
     num_edges: usize,
     vertices: V,
     edges: E,
-) -> MmapFile
+) -> MmapMutFile
 where
     V: IntoIterator<Item = Vertex>,
     E: IntoIterator<Item = Edge>,
@@ -151,7 +151,7 @@ where
     let file = tempfile::tempfile().unwrap();
     file.set_len((size_of::<InfoEdge>() * num_edges * 2) as u64)
         .unwrap();
-    let mut mm = MmapFile::from_file(file);
+    let mut mm = MmapMutFile::from_file(file);
     for (i, (&v_vlabel, &v_vid, &n_vlabel, &n_vid, direction, &elabel)) in info_edges.enumerate() {
         unsafe {
             *((mm.as_mut_ptr() as *mut InfoEdge).add(i)) =
@@ -161,7 +161,7 @@ where
     mm
 }
 
-fn create_info_edges(mm: &MmapFile) -> &[InfoEdge] {
+fn create_info_edges(mm: &MmapMutFile) -> &[InfoEdge] {
     unsafe {
         std::slice::from_raw_parts(
             mm.as_ptr() as *const InfoEdge,
