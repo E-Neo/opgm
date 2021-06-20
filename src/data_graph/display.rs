@@ -39,13 +39,11 @@ fn display_vlabel_pos_lens(
     writeln!(f, "|      vlabel |                 pos |         len |")?;
     writeln!(f, "+-------------+---------------------+-------------+")?;
     for vlabel_pos_len in vlabel_pos_lens {
-        unsafe {
-            writeln!(
-                f,
-                "|{:>12} |  {:#018x} |{:>12} |",
-                vlabel_pos_len.vlabel, vlabel_pos_len.pos, vlabel_pos_len.len
-            )?;
-        }
+        writeln!(
+            f,
+            "|{:>12} |  {:#018x} |{:>12} |",
+            vlabel_pos_len.vlabel, vlabel_pos_len.pos, vlabel_pos_len.len
+        )?;
     }
     writeln!(f, "+-------------+---------------------+-------------+")
 }
