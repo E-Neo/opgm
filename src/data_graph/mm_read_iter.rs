@@ -198,7 +198,11 @@ fn write_vlabel_pos_len(
 ) {
     mm.write(
         addr + size_of::<VLabelPosLen>() * index,
-        &VLabelPosLen { vlabel, pos, len } as *const VLabelPosLen,
+        &VLabelPosLen {
+            vlabel,
+            pos,
+            len: len as u32,
+        } as *const VLabelPosLen,
         1,
     );
 }

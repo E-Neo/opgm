@@ -22,14 +22,14 @@ fn neighbor_size(mm: &MemoryManager, n_pos: usize) -> usize {
 fn num_vertices(mm: &MemoryManager) -> usize {
     let num_vlabels = unsafe { *mm.read::<usize>(0) };
     let vlabel_pos_lens = mm.read_slice::<VLabelPosLen>(size_of::<usize>(), num_vlabels);
-    vlabel_pos_lens.iter().map(|x| x.len).sum()
+    vlabel_pos_lens.iter().map(|x| x.len as usize).sum()
 }
 
 fn num_neighbors(mm: &MemoryManager, pos: usize) -> usize {
     let num_vlabels = unsafe { (*mm.read::<VertexHeader>(pos)).num_vlabels };
     let vlabel_pos_lens =
         mm.read_slice::<VLabelPosLen>(pos + size_of::<VertexHeader>(), num_vlabels as usize);
-    vlabel_pos_lens.iter().map(|x| x.len).sum()
+    vlabel_pos_lens.iter().map(|x| x.len as usize).sum()
 }
 
 fn display_vlabel_pos_lens(

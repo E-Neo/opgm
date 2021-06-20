@@ -16,7 +16,7 @@ pub type ELabel = i16;
 pub(crate) struct VLabelPosLen {
     pub vlabel: VLabel,
     pub pos: usize,
-    pub len: usize,
+    pub len: u32,
 }
 
 pub(crate) struct VertexHeader {

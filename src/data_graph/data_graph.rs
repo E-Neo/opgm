@@ -112,7 +112,7 @@ impl DataGraph {
         let num_vlabels = unsafe { *mm.read::<usize>(0) };
         let mut index = HashMap::with_capacity(num_vlabels);
         for vpl in mm.read_slice::<VLabelPosLen>(size_of::<usize>(), num_vlabels) {
-            index.insert(vpl.vlabel, (vpl.pos, vpl.len));
+            index.insert(vpl.vlabel, (vpl.pos, vpl.len as usize));
         }
         index
     }
@@ -253,8 +253,8 @@ impl<'a> Iterator for DataVLabelNeighborIter<'a> {
             self.offset += 1;
             Some((
                 vpl.vlabel,
-                vpl.len,
-                DataNeighborIter::new(self.mm, vpl.pos, vpl.len),
+                vpl.len as usize,
+                DataNeighborIter::new(self.mm, vpl.pos, vpl.len as usize),
             ))
         } else {
             None
