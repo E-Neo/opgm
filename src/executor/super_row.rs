@@ -212,7 +212,11 @@ impl std::fmt::Display for SuperRowsInfo {
 
 pub(crate) fn read_super_row_header(super_row_mm: &MemoryManager) -> (usize, usize, usize) {
     let header = unsafe { &*super_row_mm.read::<SuperRowHeader>(0) };
-    (header.num_rows, header.num_eqvs, header.num_vertices)
+    (
+        header.num_rows as usize,
+        header.num_eqvs as usize,
+        header.num_vertices as usize,
+    )
 }
 
 fn read_pos_lens(super_row_mm: &MemoryManager, sr_pos: usize, num_eqvs: usize) -> &[PosLen] {
@@ -232,9 +236,9 @@ pub(crate) fn write_super_row_header(
     super_row_mm.write(
         0,
         &SuperRowHeader {
-            num_rows,
-            num_eqvs,
-            num_vertices,
+            num_rows: num_rows as u32,
+            num_eqvs: num_eqvs as u32,
+            num_vertices: num_vertices as u32,
         } as *const SuperRowHeader,
         1,
     );
@@ -272,8 +276,8 @@ pub fn empty_super_row_mm(super_row_mm: &mut MemoryManager, num_eqvs: usize, num
         0,
         &SuperRowHeader {
             num_rows: 0,
-            num_eqvs,
-            num_vertices,
+            num_eqvs: num_eqvs as u32,
+            num_vertices: num_vertices as u32,
         } as *const _,
         1,
     );
@@ -284,10 +288,10 @@ pub fn add_super_row(super_row_mm: &mut MemoryManager, bounds: &[usize], super_r
     let (num_rows, num_eqvs, num_vertices) =
         (header.num_rows, header.num_eqvs, header.num_vertices);
     let sr_pos = super_row_mm.len();
-    let num_bytes = calculate_num_byte(num_eqvs, bounds);
+    let num_bytes = calculate_num_byte(num_eqvs as usize, bounds);
     super_row_mm.resize(sr_pos + num_bytes);
     write_num_bytes(super_row_mm, sr_pos, num_bytes);
-    let mut pos = sr_pos + size_of::<usize>() + num_eqvs * size_of::<PosLen>();
+    let mut pos = sr_pos + size_of::<usize>() + num_eqvs as usize * size_of::<PosLen>();
     for (eqv, (&bound, &img)) in bounds.iter().zip(super_row).enumerate() {
         super_row_mm.write(
             sr_pos + size_of::<usize>() + eqv * size_of::<PosLen>(),
@@ -300,7 +304,12 @@ pub fn add_super_row(super_row_mm: &mut MemoryManager, bounds: &[usize], super_r
         super_row_mm.write(pos, img.as_ptr(), img.len());
         pos += bound * size_of::<VId>();
     }
-    write_super_row_header(super_row_mm, num_rows + 1, num_eqvs, num_vertices);
+    write_super_row_header(
+        super_row_mm,
+        num_rows as usize + 1,
+        num_eqvs as usize,
+        num_vertices as usize,
+    );
 }
 
 pub fn add_super_row_and_index(

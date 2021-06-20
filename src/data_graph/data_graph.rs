@@ -111,15 +111,15 @@ impl<'a> DataVertex<'a> {
     }
 
     pub fn in_deg(&self) -> usize {
-        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).in_deg }
+        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).in_deg as usize }
     }
 
     pub fn out_deg(&self) -> usize {
-        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).out_deg }
+        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).out_deg as usize }
     }
 
     pub fn num_vlabels(&self) -> usize {
-        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).num_vlabels }
+        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).num_vlabels as usize }
     }
 
     /// Returns an iterator visiting the neighbors
@@ -176,11 +176,11 @@ impl<'a> DataNeighbor<'a> {
     }
 
     fn num_n_to_v(&self) -> usize {
-        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).num_n_to_v }
+        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).num_n_to_v as usize }
     }
 
     fn num_v_to_n(&self) -> usize {
-        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).num_v_to_n }
+        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).num_v_to_n as usize }
     }
 
     pub fn n_to_v_elabels(&self) -> &'a [ELabel] {
@@ -208,7 +208,7 @@ pub struct DataVLabelNeighborIter<'a> {
 
 impl<'a> DataVLabelNeighborIter<'a> {
     fn new(mm: &'a MemoryManager, pos: usize) -> Self {
-        let len = unsafe { (*mm.read::<VertexHeader>(pos)).num_vlabels };
+        let len = unsafe { (*mm.read::<VertexHeader>(pos)).num_vlabels } as usize;
         let vlabel_pos_lens = mm.read_slice::<VLabelPosLen>(pos + size_of::<VertexHeader>(), len);
         let offset = 0;
         Self {

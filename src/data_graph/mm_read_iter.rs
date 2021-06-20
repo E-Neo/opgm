@@ -217,9 +217,9 @@ fn write_vertex_header(
         &VertexHeader {
             num_bytes: new_pos - pos,
             vid,
-            in_deg,
-            out_deg,
-            num_vlabels,
+            in_deg: in_deg as u32,
+            out_deg: out_deg as u32,
+            num_vlabels: num_vlabels as u16,
         } as *const VertexHeader,
         1,
     );
@@ -255,8 +255,8 @@ fn write_neighbor_header(
         pos,
         &NeighborHeader {
             nid,
-            num_n_to_v,
-            num_v_to_n,
+            num_n_to_v: num_n_to_v as u16,
+            num_v_to_n: num_v_to_n as u16,
         } as *const NeighborHeader,
         1,
     );

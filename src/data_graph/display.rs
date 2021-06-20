@@ -14,7 +14,7 @@ fn neighbor_size(mm: &MemoryManager, n_pos: usize) -> usize {
     unsafe {
         std::mem::size_of::<VId>()
             + 2 * std::mem::size_of::<usize>()
-            + ((*neighbor_header).num_n_to_v + (*neighbor_header).num_v_to_n)
+            + ((*neighbor_header).num_n_to_v as usize + (*neighbor_header).num_v_to_n as usize)
                 * std::mem::size_of::<ELabel>()
     }
 }
@@ -28,7 +28,7 @@ fn num_vertices(mm: &MemoryManager) -> usize {
 fn num_neighbors(mm: &MemoryManager, pos: usize) -> usize {
     let num_vlabels = unsafe { (*mm.read::<VertexHeader>(pos)).num_vlabels };
     let vlabel_pos_lens =
-        mm.read_slice::<VLabelPosLen>(pos + size_of::<VertexHeader>(), num_vlabels);
+        mm.read_slice::<VLabelPosLen>(pos + size_of::<VertexHeader>(), num_vlabels as usize);
     vlabel_pos_lens.iter().map(|x| x.len).sum()
 }
 
@@ -75,9 +75,10 @@ fn display_neighbor(
         num_n_to_v, num_v_to_n
     )?;
     writeln!(f, "+------------------------+------------------------+")?;
-    for elabel in
-        mm.read_slice::<ELabel>(n_pos + size_of::<NeighborHeader>(), num_n_to_v + num_v_to_n)
-    {
+    for elabel in mm.read_slice::<ELabel>(
+        n_pos + size_of::<NeighborHeader>(),
+        num_n_to_v as usize + num_v_to_n as usize,
+    ) {
         writeln!(f, "|{:^49}|", elabel)?;
     }
     writeln!(f, "+-------------------------------------------------+")
@@ -113,11 +114,12 @@ fn display_vertex(
     }
     let num_vlabels = unsafe { (*vertex_header).num_vlabels };
     let vlabel_pos_lens =
-        mm.read_slice::<VLabelPosLen>(v_pos + size_of::<VertexHeader>(), num_vlabels);
+        mm.read_slice::<VLabelPosLen>(v_pos + size_of::<VertexHeader>(), num_vlabels as usize);
     writeln!(f, "+-------------+----------+----------+-------------+")?;
     display_vlabel_pos_lens(vlabel_pos_lens, f)?;
     let num_neighbors = num_neighbors(mm, v_pos);
-    let mut n_pos = v_pos + size_of::<VertexHeader>() + size_of::<VLabelPosLen>() * num_vlabels;
+    let mut n_pos =
+        v_pos + size_of::<VertexHeader>() + size_of::<VLabelPosLen>() * num_vlabels as usize;
     for _ in 0..num_neighbors {
         display_neighbor(mm, n_pos, f)?;
         n_pos += neighbor_size(mm, n_pos);
