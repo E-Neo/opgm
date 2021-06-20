@@ -114,6 +114,7 @@ pub fn mm_read_sqlite3<P: AsRef<Path>>(mm: &mut MemoryManager, path: P) -> sqlit
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_graph::DataGraph;
 
     fn create_triangle_sqlite3() -> sqlite::Connection {
         let conn = sqlite::Connection::open(":memory:").unwrap();
@@ -146,9 +147,6 @@ mod tests {
         let mut sqlite3_mm = MemoryManager::Mem(vec![]);
         mm_read_sqlite3_connection(&mut sqlite3_mm, &create_triangle_sqlite3());
         let mm = create_triange_mm();
-        assert_eq!(
-            sqlite3_mm.read_slice::<u8>(0, sqlite3_mm.len()),
-            mm.read_slice::<u8>(0, mm.len())
-        );
+        assert_eq!(DataGraph::new(sqlite3_mm).view(), DataGraph::new(mm).view(),);
     }
 }

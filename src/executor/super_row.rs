@@ -211,12 +211,14 @@ impl std::fmt::Display for SuperRowsInfo {
 }
 
 pub(crate) fn read_super_row_header(super_row_mm: &MemoryManager) -> (usize, usize, usize) {
-    let header = unsafe { &*super_row_mm.read::<SuperRowHeader>(0) };
-    (
-        header.num_rows as usize,
-        header.num_eqvs as usize,
-        header.num_vertices as usize,
-    )
+    let header = super_row_mm.read::<SuperRowHeader>(0);
+    unsafe {
+        (
+            (*header).num_rows as usize,
+            (*header).num_eqvs as usize,
+            (*header).num_vertices as usize,
+        )
+    }
 }
 
 fn read_pos_lens(super_row_mm: &MemoryManager, sr_pos: usize, num_eqvs: usize) -> &[PosLen] {
@@ -354,6 +356,14 @@ fn calculate_num_byte(num_eqvs: usize, bounds: &[usize]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_super_row_header() {
+        let mut mm = MemoryManager::Mem(vec![]);
+        mm.resize(size_of::<SuperRowHeader>());
+        write_super_row_header(&mut mm, 1, 2, 3);
+        assert_eq!(read_super_row_header(&mm), (1, 2, 3));
+    }
 
     #[test]
     fn test_add_super_row_and_index() {

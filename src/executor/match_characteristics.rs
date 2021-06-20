@@ -309,7 +309,7 @@ mod tests {
     use super::*;
     use crate::{
         data_graph::mm_read_iter,
-        executor::{add_super_row_and_index, empty_super_row_mm},
+        executor::{add_super_row_and_index, empty_super_row_mm, SuperRowIndexView, SuperRowsView},
         pattern_graph::{Characteristic, PatternGraph},
     };
     use std::collections::HashSet;
@@ -414,21 +414,21 @@ mod tests {
         assert_eq!(
             super_row_mms
                 .iter()
-                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
+                .map(|mm| SuperRowsView::new(mm))
                 .collect::<Vec<_>>(),
             vec![super_row_mm0, super_row_mm1]
                 .iter()
-                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
+                .map(|mm| SuperRowsView::new(mm))
                 .collect::<Vec<_>>()
         );
         assert_eq!(
             index_mms
                 .iter()
-                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
+                .map(|mm| SuperRowIndexView::new(mm))
                 .collect::<Vec<_>>(),
             vec![index_mm0, index_mm1]
                 .iter()
-                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
+                .map(|mm| SuperRowIndexView::new(mm))
                 .collect::<Vec<_>>()
         );
     }
@@ -465,17 +465,6 @@ mod tests {
         pattern
     }
 
-    fn assert_mm_eq(mms1: &[MemoryManager], mms2: &[MemoryManager]) {
-        assert_eq!(
-            mms1.iter()
-                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
-                .collect::<Vec<_>>(),
-            mms2.iter()
-                .map(|mm| mm.read_slice::<u8>(0, mm.len()))
-                .collect::<Vec<_>>()
-        );
-    }
-
     #[test]
     fn test_q02() {
         let data_graph = create_data_graph_q02();
@@ -509,8 +498,26 @@ mod tests {
             &[1, 2, 1],
             &[&[2], &[1, 11], &[3]],
         );
-        assert_mm_eq(&super_row_mms, &sr_mms);
-        assert_mm_eq(&index_mms, &idx_mms);
+        assert_eq!(
+            super_row_mms
+                .iter()
+                .map(|mm| SuperRowsView::new(mm))
+                .collect::<Vec<_>>(),
+            sr_mms
+                .iter()
+                .map(|mm| SuperRowsView::new(mm))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            index_mms
+                .iter()
+                .map(|mm| SuperRowIndexView::new(mm))
+                .collect::<Vec<_>>(),
+            idx_mms
+                .iter()
+                .map(|mm| SuperRowIndexView::new(mm))
+                .collect::<Vec<_>>()
+        );
         match_characteristics(
             &data_graph,
             3,
@@ -528,7 +535,25 @@ mod tests {
             &[1, 1, 2],
             &[&[3], &[2], &[4, 14]],
         );
-        assert_mm_eq(&super_row_mms, &sr_mms);
-        assert_mm_eq(&index_mms, &idx_mms);
+        assert_eq!(
+            super_row_mms
+                .iter()
+                .map(|mm| SuperRowsView::new(mm))
+                .collect::<Vec<_>>(),
+            sr_mms
+                .iter()
+                .map(|mm| SuperRowsView::new(mm))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            index_mms
+                .iter()
+                .map(|mm| SuperRowIndexView::new(mm))
+                .collect::<Vec<_>>(),
+            idx_mms
+                .iter()
+                .map(|mm| SuperRowIndexView::new(mm))
+                .collect::<Vec<_>>()
+        );
     }
 }

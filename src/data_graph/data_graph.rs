@@ -1,5 +1,5 @@
 use crate::{
-    data_graph::display,
+    data_graph::{display, DataGraphView, NeighborView, VertexView},
     memory_manager::MemoryManager,
     types::{ELabel, NeighborHeader, VId, VLabel, VLabelPosLen, VertexHeader},
 };
@@ -78,6 +78,31 @@ impl DataGraph {
     /// Returns the occurrence of vertices with `vlabel`.
     pub fn frequency(&self, vlabel: VLabel) -> usize {
         self.index.get(&vlabel).map_or(0, |&(_, len)| len)
+    }
+
+    pub fn view(&self) -> DataGraphView {
+        DataGraphView::new(self.index.keys().map(|&vlabel| {
+            (
+                vlabel,
+                self.vertices(vlabel).1.map(|vertex| {
+                    VertexView::new(
+                        vertex.id(),
+                        vertex.vlabels().map(|(nlabel, _, neighbors)| {
+                            (
+                                nlabel,
+                                neighbors.map(|neighbor| {
+                                    NeighborView::new(
+                                        neighbor.id(),
+                                        neighbor.n_to_v_elabels().iter().map(|&e| e),
+                                        neighbor.v_to_n_elabels().iter().map(|&e| e),
+                                    )
+                                }),
+                            )
+                        }),
+                    )
+                }),
+            )
+        }))
     }
 }
 
