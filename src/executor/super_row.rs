@@ -27,7 +27,7 @@ impl<'a> SuperRow<'a> {
         Self {
             images: read_pos_lens(mm, sr_pos, num_eqvs)
                 .iter()
-                .map(|pos_len| mm.read_slice::<VId>(pos_len.pos, pos_len.len))
+                .map(|pos_len| unsafe { mm.as_slice::<VId>(pos_len.pos, pos_len.len) })
                 .collect(),
         }
     }
@@ -222,7 +222,7 @@ pub(crate) fn read_super_row_header(super_row_mm: &MemoryManager) -> (usize, usi
 }
 
 fn read_pos_lens(super_row_mm: &MemoryManager, sr_pos: usize, num_eqvs: usize) -> &[PosLen] {
-    super_row_mm.read_slice(sr_pos + size_of::<usize>(), num_eqvs)
+    unsafe { super_row_mm.as_slice(sr_pos + size_of::<usize>(), num_eqvs) }
 }
 
 fn read_usize(mm: &MemoryManager, pos: usize) -> usize {
@@ -373,8 +373,7 @@ mod tests {
         add_super_row_and_index(&mut sr_mm, &mut index_mm, &[1, 2], &[&[1], &[2, 5]]);
         add_super_row_and_index(&mut sr_mm, &mut index_mm, &[1, 2], &[&[4], &[2, 5]]);
         assert_eq!(
-            index_mm
-                .read_slice::<VIdPos>(0, index_mm.len() / size_of::<VIdPos>())
+            unsafe { index_mm.as_slice::<VIdPos>(0, index_mm.len() / size_of::<VIdPos>()) }
                 .iter()
                 .map(|vid_pos| SuperRow::new(&sr_mm, vid_pos.pos, 2)
                     .images()

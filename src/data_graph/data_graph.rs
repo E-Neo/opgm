@@ -111,7 +111,7 @@ impl DataGraph {
     fn create_index(mm: &MemoryManager) -> HashMap<VLabel, (usize, usize)> {
         let num_vlabels = unsafe { *mm.read::<usize>(0) };
         let mut index = HashMap::with_capacity(num_vlabels);
-        for vpl in mm.read_slice::<VLabelPosLen>(size_of::<usize>(), num_vlabels) {
+        for vpl in unsafe { mm.as_slice::<VLabelPosLen>(size_of::<usize>(), num_vlabels) } {
             index.insert(vpl.vlabel, (vpl.pos, vpl.len as usize));
         }
         index
@@ -209,15 +209,19 @@ impl<'a> DataNeighbor<'a> {
     }
 
     pub fn n_to_v_elabels(&self) -> &'a [ELabel] {
-        self.mm
-            .read_slice(self.pos + size_of::<NeighborHeader>(), self.num_n_to_v())
+        unsafe {
+            self.mm
+                .as_slice(self.pos + size_of::<NeighborHeader>(), self.num_n_to_v())
+        }
     }
 
     pub fn v_to_n_elabels(&self) -> &'a [ELabel] {
-        self.mm.read_slice(
-            self.pos + size_of::<NeighborHeader>() + size_of::<ELabel>() * self.num_n_to_v(),
-            self.num_v_to_n(),
-        )
+        unsafe {
+            self.mm.as_slice(
+                self.pos + size_of::<NeighborHeader>() + size_of::<ELabel>() * self.num_n_to_v(),
+                self.num_v_to_n(),
+            )
+        }
     }
 }
 
@@ -234,7 +238,8 @@ pub struct DataVLabelNeighborIter<'a> {
 impl<'a> DataVLabelNeighborIter<'a> {
     fn new(mm: &'a MemoryManager, pos: usize) -> Self {
         let len = unsafe { (*mm.read::<VertexHeader>(pos)).num_vlabels } as usize;
-        let vlabel_pos_lens = mm.read_slice::<VLabelPosLen>(pos + size_of::<VertexHeader>(), len);
+        let vlabel_pos_lens =
+            unsafe { mm.as_slice::<VLabelPosLen>(pos + size_of::<VertexHeader>(), len) };
         let offset = 0;
         Self {
             mm,

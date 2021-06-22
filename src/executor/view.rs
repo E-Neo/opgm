@@ -11,7 +11,7 @@ pub struct SuperRowIndexView(Vec<(VId, usize)>);
 impl SuperRowIndexView {
     pub fn new(mm: &MemoryManager) -> Self {
         Self(
-            mm.read_slice::<VIdPos>(0, mm.len() / size_of::<VIdPos>())
+            unsafe { mm.as_slice::<VIdPos>(0, mm.len() / size_of::<VIdPos>()) }
                 .iter()
                 .map(|entry| (entry.vid, entry.pos))
                 .collect(),

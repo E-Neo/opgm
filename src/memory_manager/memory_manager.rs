@@ -113,27 +113,37 @@ impl MemoryManager {
         }
     }
 
+    pub unsafe fn as_slice<T>(&self, pos: usize, count: usize) -> &[T] {
+        match self {
+            MemoryManager::Mem(vec) => {
+                std::slice::from_raw_parts(vec.as_ptr().add(pos) as *const T, count)
+            }
+            MemoryManager::Mmap(mmapfile) => std::slice::from_raw_parts(mmapfile.read(pos), count),
+            MemoryManager::MmapMut(mmapfile) => {
+                std::slice::from_raw_parts(mmapfile.read(pos), count)
+            }
+            MemoryManager::Sink => unimplemented!(),
+        }
+    }
+
+    pub unsafe fn as_mut_slice<T>(&mut self, pos: usize, count: usize) -> &mut [T] {
+        match self {
+            MemoryManager::Mem(vec) => {
+                std::slice::from_raw_parts_mut(vec.as_mut_ptr().add(pos) as *mut T, count)
+            }
+            MemoryManager::MmapMut(mmapfile) => {
+                std::slice::from_raw_parts_mut(mmapfile.mmap.as_mut_ptr().add(pos) as *mut T, count)
+            }
+            _ => unimplemented!(),
+        }
+    }
+
     pub fn read<T>(&self, pos: usize) -> *const T {
         match self {
             MemoryManager::Mem(vec) => unsafe { vec.as_ptr().add(pos) as *const T },
             MemoryManager::Mmap(mmapfile) => mmapfile.read(pos),
             MemoryManager::MmapMut(mmapfile) => mmapfile.read(pos),
             MemoryManager::Sink => std::ptr::null(),
-        }
-    }
-
-    pub fn read_slice<T>(&self, pos: usize, count: usize) -> &[T] {
-        match self {
-            MemoryManager::Mem(vec) => unsafe {
-                std::slice::from_raw_parts(vec.as_ptr().add(pos) as *const T, count)
-            },
-            MemoryManager::Mmap(mmapfile) => unsafe {
-                std::slice::from_raw_parts(mmapfile.read(pos), count)
-            },
-            MemoryManager::MmapMut(mmapfile) => unsafe {
-                std::slice::from_raw_parts(mmapfile.read(pos), count)
-            },
-            MemoryManager::Sink => &[],
         }
     }
 
@@ -163,29 +173,41 @@ mod tests {
     #[test]
     fn test_mem_read() {
         let mm = MemoryManager::Mem(vec![1, 2, 3, 4, 5, 6]);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [1, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            unsafe { mm.as_slice::<u8>(0, mm.len()) },
+            [1, 2, 3, 4, 5, 6]
+        );
     }
 
     #[test]
     fn test_mem_write() {
         let mut mm = MemoryManager::Mem(vec![1, 2, 3, 4, 5, 6]);
         mm.write(0, &10u8 as *const u8, 1);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [10, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            unsafe { mm.as_slice::<u8>(0, mm.len()) },
+            [10, 2, 3, 4, 5, 6]
+        );
         mm.write(1, &20u8 as *const u8, 1);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [10, 20, 3, 4, 5, 6]);
+        assert_eq!(
+            unsafe { mm.as_slice::<u8>(0, mm.len()) },
+            [10, 20, 3, 4, 5, 6]
+        );
     }
 
     #[test]
     fn test_mem_shrink_expand() {
         let mut mm = MemoryManager::Mem(vec![1, 2, 3, 4, 5, 6]);
         mm.resize(3);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [1, 2, 3]);
+        assert_eq!(unsafe { mm.as_slice::<u8>(0, mm.len()) }, [1, 2, 3]);
         mm.resize(6);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [1, 2, 3, 0, 0, 0]);
+        assert_eq!(
+            unsafe { mm.as_slice::<u8>(0, mm.len()) },
+            [1, 2, 3, 0, 0, 0]
+        );
         mm.resize(0);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), []);
+        assert_eq!(unsafe { mm.as_slice::<u8>(0, mm.len()) }, []);
         mm.resize(3);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [0, 0, 0]);
+        assert_eq!(unsafe { mm.as_slice::<u8>(0, mm.len()) }, [0, 0, 0]);
     }
 
     fn new_mmap_mm() -> MemoryManager {
@@ -212,40 +234,51 @@ mod tests {
     #[test]
     fn test_mmap_read() {
         let mm = new_mmap_mm();
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [1, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            unsafe { mm.as_slice::<u8>(0, mm.len()) },
+            [1, 2, 3, 4, 5, 6]
+        );
     }
 
     #[test]
     fn test_mmap_write() {
         let mut mm = new_mmap_mm();
         mm.write(0, &10u8 as *const u8, 1);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [10, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            unsafe { mm.as_slice::<u8>(0, mm.len()) },
+            [10, 2, 3, 4, 5, 6]
+        );
         mm.write(1, &20u8 as *const u8, 1);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [10, 20, 3, 4, 5, 6]);
+        assert_eq!(
+            unsafe { mm.as_slice::<u8>(0, mm.len()) },
+            [10, 20, 3, 4, 5, 6]
+        );
         let mut mm = new_empty_mmap_mm();
         mm.resize(size_of::<usize>());
         mm.write(0, &1995usize as *const usize, 1);
-        assert_eq!(mm.read_slice::<usize>(0, 1), [1995]);
+        assert_eq!(unsafe { mm.as_slice::<usize>(0, 1) }, [1995]);
     }
 
     #[test]
     fn test_mmap_shrink_expand() {
         let mut mm = new_mmap_mm();
         mm.resize(3);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [1, 2, 3]);
+        assert_eq!(unsafe { mm.as_slice::<u8>(0, mm.len()) }, [1, 2, 3]);
         mm.resize(6);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [1, 2, 3, 0, 0, 0]);
+        assert_eq!(
+            unsafe { mm.as_slice::<u8>(0, mm.len()) },
+            [1, 2, 3, 0, 0, 0]
+        );
         mm.resize(0);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), []);
+        assert_eq!(unsafe { mm.as_slice::<u8>(0, mm.len()) }, []);
         mm.resize(3);
-        assert_eq!(mm.read_slice::<u8>(0, mm.len()), [0, 0, 0]);
+        assert_eq!(unsafe { mm.as_slice::<u8>(0, mm.len()) }, [0, 0, 0]);
     }
 
     #[test]
     fn test_sink() {
         let mut mm = MemoryManager::Sink;
         assert_eq!(mm.len(), 0);
-        assert_eq!(mm.read_slice::<u8>(0, 0), []);
         let data = [1, 2, 3, 4, 5, 6];
         mm.write(99999, data.as_ptr(), data.len());
         mm.resize(1000);

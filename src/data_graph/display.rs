@@ -21,14 +21,15 @@ fn neighbor_size(mm: &MemoryManager, n_pos: usize) -> usize {
 
 fn num_vertices(mm: &MemoryManager) -> usize {
     let num_vlabels = unsafe { *mm.read::<usize>(0) };
-    let vlabel_pos_lens = mm.read_slice::<VLabelPosLen>(size_of::<usize>(), num_vlabels);
+    let vlabel_pos_lens = unsafe { mm.as_slice::<VLabelPosLen>(size_of::<usize>(), num_vlabels) };
     vlabel_pos_lens.iter().map(|x| x.len as usize).sum()
 }
 
 fn num_neighbors(mm: &MemoryManager, pos: usize) -> usize {
     let num_vlabels = unsafe { (*mm.read::<VertexHeader>(pos)).num_vlabels };
-    let vlabel_pos_lens =
-        mm.read_slice::<VLabelPosLen>(pos + size_of::<VertexHeader>(), num_vlabels as usize);
+    let vlabel_pos_lens = unsafe {
+        mm.as_slice::<VLabelPosLen>(pos + size_of::<VertexHeader>(), num_vlabels as usize)
+    };
     vlabel_pos_lens.iter().map(|x| x.len as usize).sum()
 }
 
@@ -50,7 +51,7 @@ fn display_vlabel_pos_lens(
 
 fn display_header(mm: &MemoryManager, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     let num_vlabels = unsafe { *mm.read::<usize>(0) };
-    let vlabel_pos_lens = mm.read_slice::<VLabelPosLen>(size_of::<usize>(), num_vlabels);
+    let vlabel_pos_lens = unsafe { mm.as_slice::<VLabelPosLen>(size_of::<usize>(), num_vlabels) };
     writeln!(f, "+-------------------------------------------------+")?;
     writeln!(f, "|{:^49}|", format!("num_vlabels: {}", num_vlabels))?;
     writeln!(f, "+-------------+---------------------+-------------+")?;
@@ -75,10 +76,12 @@ fn display_neighbor(
         num_n_to_v, num_v_to_n
     )?;
     writeln!(f, "+------------------------+------------------------+")?;
-    for elabel in mm.read_slice::<ELabel>(
-        n_pos + size_of::<NeighborHeader>(),
-        num_n_to_v as usize + num_v_to_n as usize,
-    ) {
+    for elabel in unsafe {
+        mm.as_slice::<ELabel>(
+            n_pos + size_of::<NeighborHeader>(),
+            num_n_to_v as usize + num_v_to_n as usize,
+        )
+    } {
         writeln!(f, "|{:^49}|", elabel)?;
     }
     writeln!(f, "+-------------------------------------------------+")
@@ -113,8 +116,9 @@ fn display_vertex(
         )?;
     }
     let num_vlabels = unsafe { (*vertex_header).num_vlabels };
-    let vlabel_pos_lens =
-        mm.read_slice::<VLabelPosLen>(v_pos + size_of::<VertexHeader>(), num_vlabels as usize);
+    let vlabel_pos_lens = unsafe {
+        mm.as_slice::<VLabelPosLen>(v_pos + size_of::<VertexHeader>(), num_vlabels as usize)
+    };
     writeln!(f, "+-------------+----------+----------+-------------+")?;
     display_vlabel_pos_lens(vlabel_pos_lens, f)?;
     let num_neighbors = num_neighbors(mm, v_pos);

@@ -58,7 +58,8 @@ enum IndexInner<'a> {
 
 impl<'a> IndexInner<'a> {
     fn new(index_mm: &'a MemoryManager, index_type: &IndexType) -> Self {
-        let vid_poses: &[VIdPos] = index_mm.read_slice(0, index_mm.len() / size_of::<VIdPos>());
+        let vid_poses: &[VIdPos] =
+            unsafe { index_mm.as_slice(0, index_mm.len() / size_of::<VIdPos>()) };
         match index_type {
             IndexType::Sorted => IndexInner::Sorted(vid_poses),
             IndexType::Hash => IndexInner::Hash(

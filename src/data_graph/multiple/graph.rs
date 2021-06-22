@@ -74,7 +74,7 @@ impl<'a> Graph<'a, GlobalIndex<'a>> for DataGraph {
         let num_vlabels = unsafe { *self.mm.read::<usize>(0) };
         GlobalIndex {
             mm: &self.mm,
-            index: self.mm.read_slice(size_of::<usize>(), num_vlabels),
+            index: unsafe { self.mm.as_slice(size_of::<usize>(), num_vlabels) },
         }
     }
 
@@ -246,11 +246,12 @@ impl<'a> Vertex<LocalIndex<'a>> for DataVertex<'a> {
     fn index(&self) -> LocalIndex<'a> {
         LocalIndex {
             mm: self.mm,
-            index: self
-                .mm
-                .read_slice(self.pos + size_of::<VertexHeader>(), unsafe {
-                    (*self.mm.read::<VertexHeader>(self.pos)).num_vlabels as usize
-                }),
+            index: unsafe {
+                self.mm.as_slice(
+                    self.pos + size_of::<VertexHeader>(),
+                    (*self.mm.read::<VertexHeader>(self.pos)).num_vlabels as usize,
+                )
+            },
         }
     }
 }
@@ -314,15 +315,19 @@ impl<'a> DataNeighbor<'a> {
     }
 
     pub fn n_to_v_elabels(&self) -> &'a [ELabel] {
-        self.mm
-            .read_slice(self.pos + size_of::<NeighborHeader>(), self.num_n_to_v())
+        unsafe {
+            self.mm
+                .as_slice(self.pos + size_of::<NeighborHeader>(), self.num_n_to_v())
+        }
     }
 
     pub fn v_to_n_elabels(&self) -> &'a [ELabel] {
-        self.mm.read_slice(
-            self.pos + size_of::<NeighborHeader>() + size_of::<ELabel>() * self.num_n_to_v(),
-            self.num_v_to_n(),
-        )
+        unsafe {
+            self.mm.as_slice(
+                self.pos + size_of::<NeighborHeader>() + size_of::<ELabel>() * self.num_n_to_v(),
+                self.num_v_to_n(),
+            )
+        }
     }
 }
 
