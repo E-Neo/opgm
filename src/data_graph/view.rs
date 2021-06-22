@@ -2,11 +2,11 @@ use crate::types::{ELabel, VId, VLabel};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DataGraphView {
+pub struct GraphView {
     index: BTreeMap<VLabel, BTreeSet<VertexView>>,
 }
 
-impl DataGraphView {
+impl GraphView {
     pub fn new<I, V>(index: I) -> Self
     where
         I: IntoIterator<Item = (VLabel, V)>,

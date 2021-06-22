@@ -1,5 +1,5 @@
 use crate::{
-    data_graph::{display, DataGraphView, NeighborView, VertexView},
+    data_graph::{display, GraphView, NeighborView, VertexView},
     memory_manager::MemoryManager,
     types::{ELabel, NeighborHeader, VId, VLabel, VLabelPosLen, VertexHeader},
 };
@@ -80,8 +80,8 @@ impl DataGraph {
         self.index.get(&vlabel).map_or(0, |&(_, len)| len)
     }
 
-    pub fn view(&self) -> DataGraphView {
-        DataGraphView::new(self.index.keys().map(|&vlabel| {
+    pub fn view(&self) -> GraphView {
+        GraphView::new(self.index.keys().map(|&vlabel| {
             (
                 vlabel,
                 self.vertices(vlabel).1.map(|vertex| {

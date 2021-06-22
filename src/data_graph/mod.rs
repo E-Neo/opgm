@@ -4,9 +4,10 @@ pub use data_graph::{
     DataGraph, DataGraphInfo, DataNeighbor, DataNeighborIter, DataVLabelNeighborIter, DataVertex,
     DataVertexIter,
 };
+pub use info::GraphInfo;
 pub use mm_read_iter::mm_read_iter;
 pub use mm_read_sqlite3::mm_read_sqlite3;
-pub use view::{DataGraphView, NeighborView, VertexView};
+pub use view::{GraphView, NeighborView, VertexView};
 
 pub(crate) use display::display;
 
@@ -16,6 +17,7 @@ pub mod multiple;
 
 mod data_graph;
 mod display;
+mod info;
 mod mm_read_iter;
 mod mm_read_sqlite3;
 mod view;
@@ -23,9 +25,9 @@ mod view;
 pub trait Graph<'a, I> {
     fn index(&'a self) -> I;
 
-    // fn info(&self) -> DataGraphInfo;
+    fn info(&self) -> GraphInfo;
 
-    // fn view(&self) -> DataGraphView;
+    fn view(&self) -> GraphView;
 }
 
 pub trait Index<I>: IntoIterator<Item = (VLabel, I)> {
@@ -48,12 +50,8 @@ pub trait Vertex<I> {
     fn index(&self) -> I;
 }
 
-pub trait Neighbor<C> {
+pub trait Neighbor<T> {
     fn id(&self) -> VId;
 
-    fn connection(&self) -> C;
-}
-
-pub trait Connection {
-    fn will_match(&self, other: &Self) -> bool;
+    fn topology_will_match(&self, info: &T) -> bool;
 }

@@ -1,9 +1,11 @@
-use crate::{
-    data_graph::{Graph, Index, Vertex, VertexIter},
+use crate::data_graph::{GraphInfo, GraphView, NeighborView, VertexView};
+pub(crate) use crate::{
+    data_graph::{Graph, Index, Neighbor, Vertex, VertexIter},
     memory_manager::MemoryManager,
+    pattern_graph::NeighborInfo,
     types::{ELabel, NeighborHeader, VId, VLabel, VLabelPosLen, VertexHeader},
 };
-use std::mem::size_of;
+use std::{collections::HashSet, mem::size_of};
 
 /// The data graph type under the property graph model.
 ///
@@ -71,6 +73,55 @@ impl<'a> Graph<'a, GlobalIndex<'a>> for DataGraph {
             mm: &self.mm,
             index: self.mm.read_slice(size_of::<usize>(), num_vlabels),
         }
+    }
+
+    fn info(&self) -> GraphInfo {
+        let (mut num_vertices, mut num_edges) = (0, 0);
+        let mut elabels = HashSet::new();
+        for (_, vertices) in self.index() {
+            num_vertices += vertices.len();
+            for vertex in vertices {
+                for (_, neighbors) in vertex.index() {
+                    for neighbor in neighbors {
+                        num_edges += neighbor.num_v_to_n() + neighbor.num_n_to_v();
+                        neighbor.n_to_v_elabels().iter().for_each(|&elabel| {
+                            elabels.insert(elabel);
+                        });
+                        neighbor.v_to_n_elabels().iter().for_each(|&elabel| {
+                            elabels.insert(elabel);
+                        });
+                    }
+                }
+            }
+        }
+        num_edges /= 2;
+        GraphInfo::new(num_vertices, num_edges, self.index().len(), elabels.len())
+    }
+
+    fn view(&self) -> GraphView {
+        let global_index = self.index();
+        GraphView::new(self.index().into_iter().map(|(vlabel, _)| {
+            (
+                vlabel,
+                global_index.get(vlabel).map(|vertex| {
+                    VertexView::new(
+                        vertex.id(),
+                        vertex.index().into_iter().map(|(nlabel, neighbors)| {
+                            (
+                                nlabel,
+                                neighbors.map(|neighbor| {
+                                    NeighborView::new(
+                                        neighbor.id(),
+                                        neighbor.n_to_v_elabels().iter().map(|&e| e),
+                                        neighbor.v_to_n_elabels().iter().map(|&e| e),
+                                    )
+                                }),
+                            )
+                        }),
+                    )
+                }),
+            )
+        }))
     }
 }
 
@@ -251,10 +302,6 @@ pub struct DataNeighbor<'a> {
 }
 
 impl<'a> DataNeighbor<'a> {
-    pub fn id(&self) -> VId {
-        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).nid }
-    }
-
     fn num_n_to_v(&self) -> usize {
         unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).num_n_to_v as usize }
     }
@@ -273,6 +320,35 @@ impl<'a> DataNeighbor<'a> {
             self.pos + size_of::<NeighborHeader>() + size_of::<ELabel>() * self.num_n_to_v(),
             self.num_v_to_n(),
         )
+    }
+}
+
+impl<'a, 'b> Neighbor<NeighborInfo<'b>> for DataNeighbor<'a> {
+    fn id(&self) -> VId {
+        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).nid }
+    }
+
+    fn topology_will_match(&self, info: &NeighborInfo) -> bool {
+        let mut n_to_v_elabels: HashSet<_> =
+            info.n_to_v_elabels().iter().map(|&elabel| elabel).collect();
+        let mut v_to_n_elabels: HashSet<_> =
+            info.v_to_n_elabels().iter().map(|&elabel| elabel).collect();
+        let mut undirected_elabels: HashSet<_> = info
+            .undirected_elabels()
+            .iter()
+            .map(|&elabel| elabel)
+            .collect();
+        for elabel in self.n_to_v_elabels() {
+            if !n_to_v_elabels.remove(elabel) {
+                undirected_elabels.remove(elabel);
+            }
+        }
+        for elabel in self.v_to_n_elabels() {
+            if !v_to_n_elabels.remove(elabel) {
+                undirected_elabels.remove(elabel);
+            }
+        }
+        n_to_v_elabels.len() == 0 && v_to_n_elabels.len() == 0 && undirected_elabels.len() == 0
     }
 }
 
