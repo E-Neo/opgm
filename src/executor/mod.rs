@@ -19,6 +19,8 @@ pub(crate) use super_row::{
     write_vid,
 };
 
+pub mod scan;
+
 mod count;
 mod decompress;
 mod enumerate;

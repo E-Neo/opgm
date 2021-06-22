@@ -1,4 +1,4 @@
-use crate::data_graph::{GraphInfo, GraphView, NeighborView, VertexView};
+use crate::data_graph::{GraphInfo, GraphView, NeighborIter, NeighborView, VertexView};
 pub(crate) use crate::{
     data_graph::{Graph, Index, Neighbor, Vertex, VertexIter},
     memory_manager::MemoryManager,
@@ -323,33 +323,46 @@ impl<'a> DataNeighbor<'a> {
     }
 }
 
-impl<'a, 'b> Neighbor<NeighborInfo<'b>> for DataNeighbor<'a> {
+impl<'a> Neighbor for DataNeighbor<'a> {
     fn id(&self) -> VId {
         unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).nid }
     }
 
     fn topology_will_match(&self, info: &NeighborInfo) -> bool {
-        let mut n_to_v_elabels: HashSet<_> =
-            info.n_to_v_elabels().iter().map(|&elabel| elabel).collect();
-        let mut v_to_n_elabels: HashSet<_> =
-            info.v_to_n_elabels().iter().map(|&elabel| elabel).collect();
-        let mut undirected_elabels: HashSet<_> = info
-            .undirected_elabels()
-            .iter()
-            .map(|&elabel| elabel)
-            .collect();
-        for elabel in self.n_to_v_elabels() {
-            if !n_to_v_elabels.remove(elabel) {
-                undirected_elabels.remove(elabel);
-            }
-        }
-        for elabel in self.v_to_n_elabels() {
-            if !v_to_n_elabels.remove(elabel) {
-                undirected_elabels.remove(elabel);
-            }
-        }
-        n_to_v_elabels.len() == 0 && v_to_n_elabels.len() == 0 && undirected_elabels.len() == 0
+        check_degree(self, info) && check_edges(self, info)
     }
+}
+
+fn check_degree(neighbor: &DataNeighbor, info: &NeighborInfo) -> bool {
+    neighbor.n_to_v_elabels().len() >= info.n_to_v_elabels().len()
+        && neighbor.v_to_n_elabels().len() >= info.v_to_n_elabels().len()
+        && neighbor.n_to_v_elabels().len() + neighbor.v_to_n_elabels().len()
+            >= info.n_to_v_elabels().len()
+                + info.v_to_n_elabels().len()
+                + info.undirected_elabels().len()
+}
+
+fn check_edges(neighbor: &DataNeighbor, info: &NeighborInfo) -> bool {
+    let mut n_to_v_elabels: HashSet<_> =
+        info.n_to_v_elabels().iter().map(|&elabel| elabel).collect();
+    let mut v_to_n_elabels: HashSet<_> =
+        info.v_to_n_elabels().iter().map(|&elabel| elabel).collect();
+    let mut undirected_elabels: HashSet<_> = info
+        .undirected_elabels()
+        .iter()
+        .map(|&elabel| elabel)
+        .collect();
+    for elabel in neighbor.n_to_v_elabels() {
+        if !n_to_v_elabels.remove(elabel) {
+            undirected_elabels.remove(elabel);
+        }
+    }
+    for elabel in neighbor.v_to_n_elabels() {
+        if !v_to_n_elabels.remove(elabel) {
+            undirected_elabels.remove(elabel);
+        }
+    }
+    n_to_v_elabels.len() == 0 && v_to_n_elabels.len() == 0 && undirected_elabels.len() == 0
 }
 
 /// An iterator visiting the neighbors of a data vertex.
@@ -396,6 +409,8 @@ impl<'a> ExactSizeIterator for DataNeighborIter<'a> {
         self.len
     }
 }
+
+impl<'a> NeighborIter<DataNeighbor<'a>> for DataNeighborIter<'a> {}
 
 #[derive(Debug)]
 pub struct DataGraphInfo {

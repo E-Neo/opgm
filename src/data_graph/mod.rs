@@ -11,7 +11,10 @@ pub use view::{GraphView, NeighborView, VertexView};
 
 pub(crate) use display::display;
 
-use crate::types::{VId, VLabel};
+use crate::{
+    pattern_graph::NeighborInfo,
+    types::{VId, VLabel},
+};
 
 pub mod multiple;
 
@@ -50,8 +53,8 @@ pub trait Vertex<I> {
     fn index(&self) -> I;
 }
 
-pub trait Neighbor<T> {
+pub trait Neighbor {
     fn id(&self) -> VId;
 
-    fn topology_will_match(&self, info: &T) -> bool;
+    fn topology_will_match(&self, info: &NeighborInfo) -> bool;
 }
