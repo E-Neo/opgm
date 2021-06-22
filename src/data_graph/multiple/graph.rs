@@ -1,9 +1,12 @@
-use crate::data_graph::{GraphInfo, GraphView, NeighborIter, NeighborView, VertexView};
-pub(crate) use crate::{
-    data_graph::{Graph, Index, Neighbor, Vertex, VertexIter},
+use super::types::{NeighborHeader, VLabelPosLen, VertexHeader};
+use crate::{
+    data_graph::{
+        Graph, GraphInfo, GraphView, Index, Neighbor, NeighborIter, NeighborView, Vertex,
+        VertexIter, VertexView,
+    },
     memory_manager::MemoryManager,
     pattern_graph::NeighborInfo,
-    types::{ELabel, NeighborHeader, VId, VLabel, VLabelPosLen, VertexHeader},
+    types::{ELabel, VId, VLabel},
 };
 use std::{collections::HashSet, mem::size_of};
 
