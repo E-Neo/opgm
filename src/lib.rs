@@ -7,3 +7,5 @@ pub mod memory_manager;
 pub mod pattern_graph;
 pub mod planner;
 pub mod types;
+
+pub(crate) mod tools;
