@@ -5,9 +5,9 @@ use clap::{
 use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
-    data_graph::{mm_read_sqlite3, DataGraph, DataGraphInfo},
+    data_graph::{DataGraph, DataGraphInfo},
     executor::{count_rows, count_rows_slow, enumerate, SuperRows, SuperRowsInfo},
-    memory_manager::{MemoryManager, MmapFile, MmapMutFile},
+    memory_manager::{MemoryManager, MmapFile},
     planner::{IndexType, MemoryManagerType, Plan, Task},
     types::VId,
 };
@@ -25,9 +25,8 @@ enum Err {
 
 impl std::error::Error for Err {}
 
-fn handle_createdb(matches: &ArgMatches) -> Result<(), sqlite::Error> {
-    let mut mm = MemoryManager::MmapMut(MmapMutFile::new(matches.value_of("DATAGRAPH").unwrap()));
-    mm_read_sqlite3(&mut mm, matches.value_of("SQLITE3").unwrap())
+fn handle_createdb(_matches: &ArgMatches) -> std::io::Result<()> {
+    todo!()
 }
 
 fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
