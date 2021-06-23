@@ -6,5 +6,8 @@ pub use planner::{
     Plan, Planner, StarInfo, Task,
 };
 
+pub mod join;
+pub mod scan;
+
 mod decompose_stars;
 mod planner;
