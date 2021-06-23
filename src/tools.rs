@@ -48,3 +48,28 @@ where
         }
     }
 }
+
+pub struct ExactSizeIter<I: Iterator> {
+    iter: I,
+    len: usize,
+}
+
+impl<I: Iterator> ExactSizeIter<I> {
+    pub fn new(iter: I, len: usize) -> Self {
+        Self { iter, len }
+    }
+}
+
+impl<T, I: Iterator<Item = T>> Iterator for ExactSizeIter<I> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
+impl<I: Iterator> ExactSizeIterator for ExactSizeIter<I> {
+    fn len(&self) -> usize {
+        self.len
+    }
+}

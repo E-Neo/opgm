@@ -1,7 +1,7 @@
 use super::types::{NeighborHeader, VLabelPosLen, VertexHeader};
 use crate::{
     memory_manager::MemoryManager,
-    tools::GroupBy,
+    tools::{ExactSizeIter, GroupBy},
     types::{ELabel, VId, VLabel},
 };
 use std::{
@@ -13,16 +13,25 @@ type Vertex = (VId, VLabel);
 type Edge = (VId, VId, ELabel);
 type InfoEdge = (VLabel, VId, VLabel, VId, bool, ELabel);
 
-pub fn mm_from_iter<V, E>(
-    mm: &mut MemoryManager,
-    temp_mm: &mut MemoryManager,
-    vertices: V,
-    edges: E,
-) where
-    V: IntoIterator<Item = Vertex>,
-    E: IntoIterator<Item = Edge>,
+pub fn mm_from_iter<V, E>(mm: &mut MemoryManager, vertices: V, edges: E)
+where
+    V: ExactSizeIterator<Item = Vertex>,
+    E: ExactSizeIterator<Item = Edge>,
 {
-    let (num_vlabels, info_edges) = create_info_edges(temp_mm, vertices, edges);
+    let (num_vertices, num_edges) = (vertices.len(), edges.len());
+    let temp_mm_size = 2 * num_edges * size_of::<InfoEdge>();
+    let mut temp_mm = if sys_info::mem_info().unwrap().avail > temp_mm_size as u64 {
+        MemoryManager::new_mem(temp_mm_size)
+    } else {
+        let path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+        MemoryManager::new_mmap_mut(path, temp_mm_size).unwrap()
+    };
+    let (num_vlabels, info_edges) = create_info_edges(&mut temp_mm, vertices, edges);
+    mm.resize(estimate_datagraph_size(
+        num_vlabels,
+        num_vertices,
+        num_edges,
+    ));
     unsafe {
         mm.copy_from_slice(0, &[num_vlabels]);
     }
@@ -39,6 +48,55 @@ pub fn mm_from_iter<V, E>(
         pos = new_pos;
     }
     mm.resize(pos);
+}
+
+/// Reads the data graph stored in the SQLite3 file into `mm`.
+///
+/// The SQLite3 file must have the following schema:
+///
+/// ```sql
+/// CREATE TABLE vertices (vid INT, vlabel INT);
+/// CREATE TABLE edges (src INT, dst INT, elabel INT);
+/// ```
+pub fn mm_from_sqlite(mm: &mut MemoryManager, conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    let num_vertices = conn
+        .prepare("SELECT COUNT(*) FROM vertices")?
+        .query_row([], |row| row.get(0))?;
+    let num_edges = conn
+        .prepare("SELECT COUNT(*) FROM edges")?
+        .query_row([], |row| row.get(0))?;
+    let mut vertices_stmt = conn.prepare("SELECT * FROM vertices")?;
+    let mut edges_stmt = conn.prepare("SELECT * FROM edges")?;
+    mm_from_iter(
+        mm,
+        ExactSizeIter::new(
+            vertices_stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(|row| row.ok()),
+            num_vertices,
+        ),
+        ExactSizeIter::new(
+            edges_stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                .filter_map(|row| row.ok()),
+            num_edges,
+        ),
+    );
+    Ok(())
+}
+
+fn estimate_datagraph_size(num_vlabels: usize, num_vertices: usize, num_edges: usize) -> usize {
+    let vlabel_pos_len_size = size_of::<VLabelPosLen>() * num_vlabels;
+    let header_size = size_of::<usize>() + vlabel_pos_len_size;
+    let vertex_header_size = size_of::<VertexHeader>() * num_vertices;
+    let vertex_vlabel_pos_len_size = vlabel_pos_len_size * num_vertices;
+    let neighbor_header_size = size_of::<NeighborHeader>() * num_edges * 2;
+    let elabel_size = size_of::<ELabel>() * num_edges * 2;
+    header_size
+        + vertex_header_size
+        + vertex_vlabel_pos_len_size
+        + neighbor_header_size
+        + elabel_size
 }
 
 fn write_vertices(mm: &mut MemoryManager, mut pos: usize, edges: &[InfoEdge]) -> (usize, u32) {
@@ -223,6 +281,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_graph::{multiple::DataGraph, Graph, GraphView};
+    use rusqlite::params;
+    use std::mem::size_of;
 
     #[test]
     fn test_create_info_edges() {
@@ -242,6 +303,34 @@ mod tests {
                 vec![(1, 2, 12), (1, 3, 13), (2, 3, 23)]
             ),
             (2, info_edges)
+        );
+    }
+
+    #[test]
+    fn test_mm_read_sqlite() {
+        let vertices: Vec<(VId, VLabel)> = vec![(1, 10), (2, 20), (3, 30)];
+        let edges: Vec<(VId, VId, ELabel)> = vec![(1, 2, 12), (1, 3, 13), (2, 3, 23), (3, 2, 32)];
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE vertices (vid INT, vlabel INT)", [])
+            .unwrap();
+        conn.execute("CREATE TABLE edges (src INT, dst INT, elabel INT)", [])
+            .unwrap();
+        for &(vid, vlabel) in &vertices {
+            conn.execute("INSERT INTO vertices VALUES (?1, ?2)", params![vid, vlabel])
+                .unwrap();
+        }
+        for &(src, dst, elabel) in &edges {
+            conn.execute(
+                "INSERT INTO edges VALUES (?1, ?2, ?3)",
+                params![src, dst, elabel],
+            )
+            .unwrap();
+        }
+        let mut mm = MemoryManager::new_mem(0);
+        mm_from_sqlite(&mut mm, &conn).unwrap();
+        assert_eq!(
+            DataGraph::new(mm).view(),
+            GraphView::from_iter(vertices, edges)
         );
     }
 }

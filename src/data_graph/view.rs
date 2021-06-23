@@ -1,5 +1,8 @@
-use crate::types::{ELabel, VId, VLabel};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::{
+    tools::GroupBy,
+    types::{ELabel, VId, VLabel},
+};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GraphView {
@@ -16,6 +19,66 @@ impl GraphView {
             index: index
                 .into_iter()
                 .map(|(l, vs)| (l, vs.into_iter().collect()))
+                .collect(),
+        }
+    }
+
+    pub fn from_iter<V, E>(vertices: V, edges: E) -> Self
+    where
+        V: IntoIterator<Item = (VId, VLabel)>,
+        E: IntoIterator<Item = (VId, VId, ELabel)>,
+    {
+        let vid_vlabel_map: HashMap<VId, VLabel> = vertices.into_iter().collect();
+        let mut info_edges: Vec<(VLabel, VId, VLabel, VId, bool, ELabel)> = edges
+            .into_iter()
+            .flat_map(|(src, dst, elabel)| {
+                let (src_label, dst_label) = (
+                    *vid_vlabel_map.get(&src).unwrap(),
+                    *vid_vlabel_map.get(&dst).unwrap(),
+                );
+                vec![
+                    (dst_label, dst, src_label, src, false, elabel),
+                    (src_label, src, dst_label, dst, true, elabel),
+                ]
+            })
+            .collect();
+        info_edges.sort();
+        // This is crazy:
+        Self {
+            index: GroupBy::new(&info_edges, |e| e.0)
+                .map(|(vlabel, vlabel_group)| {
+                    (
+                        vlabel,
+                        GroupBy::new(vlabel_group, |e| e.1)
+                            .map(|(vid, vid_group)| {
+                                VertexView::new(
+                                    vid,
+                                    GroupBy::new(vid_group, |e| e.2).map(
+                                        |(nlabel, nlabel_group)| {
+                                            (
+                                                nlabel,
+                                                GroupBy::new(nlabel_group, |e| e.3).map(
+                                                    |(nid, nid_group)| {
+                                                        let (mut n_to_v, mut v_to_n) =
+                                                            (vec![], vec![]);
+                                                        for &(_, _, _, _, dir, e) in nid_group {
+                                                            if dir {
+                                                                v_to_n.push(e);
+                                                            } else {
+                                                                n_to_v.push(e);
+                                                            }
+                                                        }
+                                                        NeighborView::new(nid, n_to_v, v_to_n)
+                                                    },
+                                                ),
+                                            )
+                                        },
+                                    ),
+                                )
+                            })
+                            .collect(),
+                    )
+                })
                 .collect(),
         }
     }
