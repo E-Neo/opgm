@@ -9,7 +9,7 @@ use crate::{
     executor::{join, match_characteristics, read_super_row_header, JoinedSuperRows},
     memory_manager::{MemoryManager, MmapMutFile},
     pattern_graph::{Characteristic, PatternGraph},
-    planner::{decompose_stars, CharacteristicInfo, StarInfo},
+    planner::{decompose_stars, CharacteristicInfo, IndexType, StarInfo},
     types::{GlobalConstraint, VId, VLabel},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -19,12 +19,6 @@ pub enum MemoryManagerType<'a> {
     Mem,
     Mmap(PathBuf, &'a str), // (directory, name)
     Sink,
-}
-
-#[derive(Clone)]
-pub enum IndexType {
-    Sorted,
-    Hash,
 }
 
 pub struct Task<'a, 'b> {

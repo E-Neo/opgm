@@ -2,7 +2,7 @@
 
 pub use decompose_stars::decompose_stars;
 pub use planner::{
-    IndexType, IndexedJoinPlan, IntersectionPlan, JoinPlan, MemoryManagerType, Plan, Planner, Task,
+    IndexedJoinPlan, IntersectionPlan, JoinPlan, MemoryManagerType, Plan, Planner, Task,
 };
 pub use types::{CharacteristicInfo, IndexType, StarInfo};
 

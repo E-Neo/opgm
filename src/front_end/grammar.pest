@@ -1,0 +1,48 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+
+stat = _{
+    SOI
+    ~ "("
+    ~ "match"
+    ~ vertices_stat
+    ~ arcs_stat?
+    ~ edges_stat?
+    ~ where_stat?
+    ~ ")"
+    ~ EOI
+}
+
+vertices_stat = { "(" ~ "vertices" ~ vertex+ ~ ")" }
+arcs_stat = { "(" ~ "arcs" ~ edge+ ~ ")" }
+edges_stat = { "(" ~ "edges" ~ edge+ ~ ")" }
+
+vertex = _{ "(" ~ ident ~ label ~ ")" }
+edge = _{ "(" ~ ident ~ ident ~ label ~ ")" }
+
+where_stat = { "(" ~ "where" ~ expr ~ ")" }
+expr = {
+      ident
+    | int
+    | bool
+    | and_expr
+    | or_expr
+    | not_expr
+    | lt_expr
+    | ge_expr
+    | eq_expr
+    | neq_expr
+    | mod_expr
+}
+and_expr = { "(" ~ "and" ~ expr ~ expr ~ ")" }
+or_expr = { "(" ~ "or" ~ expr ~ expr ~ ")" }
+not_expr = { "(" ~ "not" ~ expr ~ ")" }
+lt_expr = { "(" ~ "<" ~ expr ~ expr ~ ")" }
+ge_expr = { "(" ~ ">=" ~ expr ~ expr ~ ")" }
+eq_expr = { "(" ~ "=" ~ expr ~ expr ~ ")" }
+neq_expr = { "(" ~ "!=" ~ expr ~ expr ~ ")" }
+mod_expr = { "(" ~ "%" ~ expr ~ expr ~ ")" }
+
+ident = @{ "u" ~ (ASCII_DIGIT+) }
+label = { ASCII_DIGIT+ }
+int = @{ "-"? ~ ASCII_DIGIT+ }
+bool = { "#t" | "#f" }
