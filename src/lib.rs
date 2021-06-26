@@ -5,6 +5,7 @@ pub mod data_graph;
 pub mod executor;
 pub mod front_end;
 pub mod memory_manager;
+pub mod pattern;
 pub mod pattern_graph;
 pub mod planner;
 pub mod types;
