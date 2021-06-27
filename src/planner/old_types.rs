@@ -1,42 +1,43 @@
 use crate::{
-    pattern::{Characteristic, NeighborInfo, PatternGraph},
+    pattern_graph::{Characteristic, NeighborInfo, PatternGraph},
     types::{VId, VLabel},
 };
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CharacteristicInfo {
+pub struct CharacteristicInfo<'a, 'b> {
     id: usize,
-    characteristic: Characteristic,
-    nlabel_ninfo_eqvs: BTreeMap<VLabel, Vec<(NeighborInfo, usize)>>,
+    characteristic: Characteristic<'a, 'b>,
+    nlabel_ninfo_eqvs: BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize)>>,
 }
 
-impl CharacteristicInfo {
+impl<'a, 'b> CharacteristicInfo<'a, 'b> {
     pub fn id(&self) -> usize {
         self.id
     }
 
-    pub fn characteristic(&self) -> &Characteristic {
+    pub fn characteristic(&self) -> &Characteristic<'a, 'b> {
         &self.characteristic
     }
 
-    pub fn nlabel_ninfo_eqvs(&self) -> &BTreeMap<VLabel, Vec<(NeighborInfo, usize)>> {
+    pub fn nlabel_ninfo_eqvs(&self) -> &BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize)>> {
         &self.nlabel_ninfo_eqvs
     }
 }
 
-impl CharacteristicInfo {
-    pub fn new(characteristic: Characteristic, id: usize) -> Self {
-        let mut nlabel_ninfo_eqvs: BTreeMap<VLabel, Vec<(NeighborInfo, usize)>> = BTreeMap::new();
+impl<'a, 'b> CharacteristicInfo<'a, 'b> {
+    pub fn new(characteristic: Characteristic<'a, 'b>, id: usize) -> Self {
+        let mut nlabel_ninfo_eqvs: BTreeMap<VLabel, Vec<(&'a NeighborInfo<'b>, usize)>> =
+            BTreeMap::new();
         characteristic
             .infos()
             .iter()
             .enumerate()
-            .for_each(|(i, ninfo)| {
+            .for_each(|(i, &ninfo)| {
                 nlabel_ninfo_eqvs
                     .entry(ninfo.vlabel())
                     .or_default()
-                    .push((ninfo.clone(), i + 1));
+                    .push((ninfo, i + 1));
             });
         Self {
             id,
@@ -47,14 +48,14 @@ impl CharacteristicInfo {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct StarInfo {
+pub struct StarInfo<'a, 'b> {
     root: VId,
     vertex_cover: Vec<VId>,
-    characteristic_info: CharacteristicInfo,
+    characteristic_info: CharacteristicInfo<'a, 'b>,
     vertex_eqv: HashMap<VId, usize>,
 }
 
-impl StarInfo {
+impl<'a, 'b> StarInfo<'a, 'b> {
     pub fn root(&self) -> VId {
         self.root
     }
@@ -63,7 +64,7 @@ impl StarInfo {
         self.characteristic_info.id()
     }
 
-    pub fn characteristic(&self) -> &Characteristic {
+    pub fn characteristic(&self) -> &Characteristic<'a, 'b> {
         self.characteristic_info.characteristic()
     }
 
@@ -72,16 +73,16 @@ impl StarInfo {
     }
 }
 
-impl StarInfo {
-    pub fn new(pattern_graph: &PatternGraph, root: VId, id: usize) -> Self {
+impl<'a, 'b> StarInfo<'a, 'b> {
+    pub fn new(pattern_graph: &'a PatternGraph<'b>, root: VId, id: usize) -> Self {
         let characteristic = Characteristic::new(&pattern_graph, root);
         let mut vertex_eqv: HashMap<VId, usize> = HashMap::new();
         vertex_eqv.insert(root, 0);
-        let neighbor_info_offset: HashMap<NeighborInfo, usize> = characteristic
+        let neighbor_info_offset: HashMap<&NeighborInfo, usize> = characteristic
             .infos()
             .iter()
             .enumerate()
-            .map(|(i, info)| (info.clone(), i + 1))
+            .map(|(i, &info)| (info, i + 1))
             .collect();
         for (&n, info) in pattern_graph.neighbors(root).unwrap() {
             vertex_eqv.insert(n, *neighbor_info_offset.get(info).unwrap());

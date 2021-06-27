@@ -1,16 +1,16 @@
 use crate::{
-    pattern_graph::{Characteristic, PatternGraph},
+    pattern::{Characteristic, PatternGraph},
     planner::CharacteristicInfo,
     types::{VId, VLabel},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-pub struct ScanPlan<'a, 'b> {
-    plan: Vec<(VLabel, Vec<CharacteristicInfo<'a, 'b>>)>,
+pub struct ScanPlan {
+    plan: Vec<(VLabel, Vec<CharacteristicInfo>)>,
 }
 
-impl<'a, 'b> ScanPlan<'a, 'b> {
-    pub fn new(pattern_graph: &'b PatternGraph<'a>, roots: &[VId]) -> Self {
+impl ScanPlan {
+    pub fn new(pattern_graph: &PatternGraph, roots: &[VId]) -> Self {
         let characteristic_id_map = create_characteristic_id_map(pattern_graph, roots);
         let mut vlabel_characteristics: BTreeMap<VLabel, BTreeSet<CharacteristicInfo>> =
             BTreeMap::new();
@@ -31,15 +31,15 @@ impl<'a, 'b> ScanPlan<'a, 'b> {
         }
     }
 
-    pub fn plan(&self) -> &[(VLabel, Vec<CharacteristicInfo<'a, 'b>>)] {
+    pub fn plan(&self) -> &[(VLabel, Vec<CharacteristicInfo>)] {
         &self.plan
     }
 }
 
-fn create_characteristic_id_map<'a, 'b>(
-    pattern_graph: &'a PatternGraph<'b>,
+fn create_characteristic_id_map(
+    pattern_graph: &PatternGraph,
     roots: &[VId],
-) -> HashMap<Characteristic<'a, 'b>, usize> {
+) -> HashMap<Characteristic, usize> {
     let mut id = 0;
     let mut characteristic_id_map = HashMap::with_capacity(roots.len());
     for &root in roots {
@@ -58,7 +58,7 @@ fn create_characteristic_id_map<'a, 'b>(
 mod tests {
     use super::*;
 
-    fn create_pattern_graph<'a>() -> PatternGraph<'a> {
+    fn create_pattern_graph() -> PatternGraph {
         let mut p = PatternGraph::new();
         for (u, l) in vec![(1, 1), (2, 2), (3, 2)] {
             p.add_vertex(u, l);
@@ -69,7 +69,7 @@ mod tests {
         p
     }
 
-    fn create_pattern_graph2<'a>() -> PatternGraph<'a> {
+    fn create_pattern_graph2() -> PatternGraph {
         let mut p = PatternGraph::new();
         for (vid, vlabel) in vec![(1, 0), (2, 1), (3, 2), (4, 1), (5, 0)] {
             p.add_vertex(vid, vlabel);

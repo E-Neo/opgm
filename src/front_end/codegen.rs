@@ -181,7 +181,7 @@ pub fn emit_vertex_constraint(expr: &Expr) -> VertexConstraint {
     )
 }
 
-fn emit_edge_constraint(expr: &Expr) -> EdgeConstraint {
+pub fn emit_edge_constraint(expr: &Expr) -> EdgeConstraint {
     let expr = expr.clone();
     EdgeConstraint::new(
         expr.clone(),

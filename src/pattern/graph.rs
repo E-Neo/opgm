@@ -4,7 +4,7 @@ use crate::{
 };
 use std::collections::{BTreeSet, HashMap};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NeighborInfo {
     vlabel: VLabel,
     n_to_v_arcs: BTreeSet<ELabel>,

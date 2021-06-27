@@ -1,5 +1,5 @@
 use crate::{
-    pattern_graph::PatternGraph,
+    pattern::PatternGraph,
     planner::{IndexType, StarInfo},
     types::VId,
 };
@@ -113,6 +113,7 @@ impl JoinPlan {
 fn get_leaves(pattern_graph: &PatternGraph, stars: &[StarInfo]) -> BTreeSet<VId> {
     pattern_graph
         .vertices()
+        .into_iter()
         .map(|(uid, _)| uid)
         .collect::<BTreeSet<VId>>()
         .difference(&stars.iter().map(|star| star.root()).collect())

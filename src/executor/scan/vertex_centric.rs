@@ -2,7 +2,7 @@ use crate::{
     data_graph::{Graph, Index, Neighbor, NeighborIter, Vertex, VertexIter},
     executor::{write_index, write_num_bytes, write_pos_len, write_super_row_header, write_vid},
     memory_manager::MemoryManager,
-    pattern_graph::NeighborInfo,
+    pattern::NeighborInfo,
     planner::CharacteristicInfo,
     types::{PosLen, SuperRowHeader, VId, VIdPos, VLabel},
 };
@@ -183,7 +183,7 @@ fn match_neighbors<LIdx, NIter, V, N>(
     pos_lens: &mut [(usize, usize)],
     vertex: &V,
     neighbors: NIter,
-    ninfo_eqvs: &[(&NeighborInfo, usize)],
+    ninfo_eqvs: &[(NeighborInfo, usize)],
 ) -> usize
 where
     LIdx: Index<NIter>,
@@ -192,11 +192,11 @@ where
     N: Neighbor,
 {
     for neighbor in neighbors {
-        for &(ninfo, eqv) in ninfo_eqvs {
-            if check_neighbor_constraints(vertex, &neighbor, ninfo)
-                && neighbor.topology_will_match(ninfo)
+        for (ninfo, eqv) in ninfo_eqvs {
+            if check_neighbor_constraints(vertex, &neighbor, &ninfo)
+                && neighbor.topology_will_match(&ninfo)
             {
-                let pos_len = &mut pos_lens[eqv];
+                let pos_len = &mut pos_lens[*eqv];
                 let &mut (pos, len) = pos_len;
                 let pos = pos + len * size_of::<VId>();
                 write_vid(super_row_mm, pos, neighbor.id());
@@ -319,7 +319,7 @@ mod tests {
     use crate::{
         data_graph::{mm_read_iter, multiple::DataGraph},
         executor::{add_super_row_and_index, empty_super_row_mm, SuperRowIndexView, SuperRowsView},
-        pattern_graph::{Characteristic, PatternGraph},
+        pattern::{Characteristic, PatternGraph},
     };
     use std::collections::HashSet;
 
@@ -364,7 +364,7 @@ mod tests {
         DataGraph::new(mm)
     }
 
-    fn create_pattern_graph<'a>() -> PatternGraph<'a> {
+    fn create_pattern_graph() -> PatternGraph {
         let mut p = PatternGraph::new();
         for (vid, vlabel) in vec![(1, 0), (2, 1), (3, 2), (4, 1), (5, 0)] {
             p.add_vertex(vid, vlabel);
@@ -461,7 +461,7 @@ mod tests {
         DataGraph::new(mm)
     }
 
-    fn create_pattern_graph_q02<'a>() -> PatternGraph<'a> {
+    fn create_pattern_graph_q02() -> PatternGraph {
         let mut pattern = PatternGraph::new();
         vec![(1, 1), (2, 2), (3, 3), (4, 4)]
             .into_iter()

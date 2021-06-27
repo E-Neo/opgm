@@ -1,4 +1,4 @@
-use super::codegen::emit_vertex_constraint;
+use super::codegen::{emit_edge_constraint, emit_vertex_constraint};
 use crate::{front_end::Expr, types::VId};
 use derive_more::AsRef;
 
@@ -26,9 +26,30 @@ impl Clone for VertexConstraint {
         emit_vertex_constraint(&self.expr)
     }
 }
+
 impl PartialEq for VertexConstraint {
     fn eq(&self, other: &Self) -> bool {
         self.expr == other.expr
+    }
+}
+
+impl Eq for VertexConstraint {}
+
+impl PartialOrd for VertexConstraint {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.expr.partial_cmp(&other.expr)
+    }
+}
+
+impl Ord for VertexConstraint {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.expr.cmp(&other.expr)
+    }
+}
+
+impl std::hash::Hash for VertexConstraint {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.expr.hash(state)
     }
 }
 
@@ -51,9 +72,35 @@ impl EdgeConstraint {
     }
 }
 
+impl Clone for EdgeConstraint {
+    fn clone(&self) -> Self {
+        emit_edge_constraint(&self.expr)
+    }
+}
+
 impl PartialEq for EdgeConstraint {
     fn eq(&self, other: &Self) -> bool {
         self.expr == other.expr
+    }
+}
+
+impl Eq for EdgeConstraint {}
+
+impl PartialOrd for EdgeConstraint {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.expr.partial_cmp(&other.expr)
+    }
+}
+
+impl Ord for EdgeConstraint {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.expr.cmp(&other.expr)
+    }
+}
+
+impl std::hash::Hash for EdgeConstraint {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.expr.hash(state)
     }
 }
 

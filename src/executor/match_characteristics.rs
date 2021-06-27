@@ -3,7 +3,7 @@ use crate::{
     executor::{write_index, write_num_bytes, write_pos_len, write_super_row_header, write_vid},
     memory_manager::MemoryManager,
     pattern_graph::NeighborInfo,
-    planner::CharacteristicInfo,
+    planner::old_types::CharacteristicInfo,
     types::{PosLen, SuperRowHeader, VId, VIdPos, VLabel},
 };
 use std::cmp::Ordering;

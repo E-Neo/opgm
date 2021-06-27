@@ -1,3 +1,5 @@
-pub use pattern_graph::{NeighborInfo, PatternGraph};
+pub use characteristic::Characteristic;
+pub use graph::{NeighborInfo, PatternGraph};
 
-mod pattern_graph;
+mod characteristic;
+mod graph;

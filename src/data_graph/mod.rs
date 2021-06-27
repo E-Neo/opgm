@@ -11,7 +11,7 @@ pub use view::{GraphView, NeighborView, VertexView};
 pub(crate) use display::display;
 
 use crate::{
-    pattern_graph::NeighborInfo,
+    pattern::NeighborInfo,
     types::{VId, VLabel},
 };
 

@@ -56,7 +56,7 @@ impl Ast {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Expr {
     VId(VId),
     Int(VId),

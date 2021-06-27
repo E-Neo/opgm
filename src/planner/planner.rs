@@ -9,7 +9,11 @@ use crate::{
     executor::{join, match_characteristics, read_super_row_header, JoinedSuperRows},
     memory_manager::{MemoryManager, MmapMutFile},
     pattern_graph::{Characteristic, PatternGraph},
-    planner::{decompose_stars, CharacteristicInfo, IndexType, StarInfo},
+    planner::{
+        decompose_stars,
+        old_types::{CharacteristicInfo, StarInfo},
+        IndexType,
+    },
     types::{GlobalConstraint, VId, VLabel},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};

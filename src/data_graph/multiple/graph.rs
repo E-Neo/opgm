@@ -5,7 +5,7 @@ use crate::{
         VertexIter, VertexView,
     },
     memory_manager::MemoryManager,
-    pattern_graph::NeighborInfo,
+    pattern::NeighborInfo,
     types::{ELabel, VId, VLabel},
 };
 use std::{collections::HashSet, mem::size_of};
