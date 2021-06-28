@@ -18,11 +18,9 @@ fn handle_createdb(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
 }
 
 fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
+    let data_graph_mm = MemoryManager::new_mmap(matches.value_of("DATAGRAPH").unwrap())?;
     let info = match matches.value_of("FMT").unwrap() {
-        "multiple" => data_graph::multiple::DataGraph::new(MemoryManager::new_mmap(
-            matches.value_of("DATAGRAPH").unwrap(),
-        )?)
-        .info(),
+        "multiple" => data_graph::multiple::DataGraph::new(&data_graph_mm).info(),
         _ => unreachable!(),
     };
     println!("{}", info);

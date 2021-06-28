@@ -329,7 +329,7 @@ mod tests {
         let mut mm = MemoryManager::new_mem(0);
         mm_from_sqlite(&mut mm, &conn).unwrap();
         assert_eq!(
-            DataGraph::new(mm).view(),
+            DataGraph::new(&mm).view(),
             GraphView::from_iter(vertices, edges)
         );
     }

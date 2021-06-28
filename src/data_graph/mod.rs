@@ -23,8 +23,8 @@ mod info;
 mod mm_read_iter;
 mod view;
 
-pub trait Graph<'a, I> {
-    fn index(&'a self) -> I;
+pub trait Graph<I> {
+    fn index(&self) -> I;
 
     fn info(&self) -> GraphInfo;
 

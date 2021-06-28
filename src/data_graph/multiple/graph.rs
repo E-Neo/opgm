@@ -59,19 +59,19 @@ use std::{collections::HashSet, mem::size_of};
 /// +-----------------------------------------+                              |
 ///                     ...                    <-----------------------------+
 /// ```
-pub struct DataGraph {
-    mm: MemoryManager,
+pub struct DataGraph<'a> {
+    mm: &'a MemoryManager,
 }
 
-impl DataGraph {
-    pub fn new(mm: MemoryManager) -> Self {
+impl<'a> DataGraph<'a> {
+    pub fn new(mm: &'a MemoryManager) -> Self {
         DataGraph { mm }
     }
 }
 
-impl<'a> Graph<'a, GlobalIndex<'a>> for DataGraph {
-    fn index(&'a self) -> GlobalIndex<'a> {
-        let num_vlabels = unsafe { *self.mm.read::<usize>(0) };
+impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
+    fn index(&self) -> GlobalIndex<'a> {
+        let &num_vlabels = unsafe { self.mm.as_ref::<usize>(0) };
         GlobalIndex {
             mm: &self.mm,
             index: unsafe { self.mm.as_slice(size_of::<usize>(), num_vlabels) },
@@ -433,7 +433,7 @@ mod tests {
     use super::*;
     use crate::data_graph::mm_read_iter;
 
-    fn create_triangle() -> DataGraph {
+    fn create_triangle_mm() -> MemoryManager {
         let mut mm = MemoryManager::Mem(vec![]);
         mm_read_iter(
             &mut mm,
@@ -443,10 +443,10 @@ mod tests {
             vec![(1, 10), (2, 20), (3, 20)],
             vec![(1, 2, 12), (1, 3, 13), (2, 3, 23), (3, 2, 32)],
         );
-        DataGraph::new(mm)
+        mm
     }
 
-    fn create_star() -> DataGraph {
+    fn create_star_mm() -> MemoryManager {
         let mut mm = MemoryManager::Mem(vec![]);
         let vertices = vec![(1, 1), (3, 2), (4, 2), (5, 3), (6, 3)];
         let edges = vec![
@@ -459,12 +459,13 @@ mod tests {
             (1, 6, 2),
         ];
         mm_read_iter(&mut mm, 3, vertices.len(), edges.len(), vertices, edges);
-        DataGraph::new(mm)
+        mm
     }
 
     #[test]
     fn test_vertices() {
-        let data_graph = create_triangle();
+        let data_graph_mm = create_triangle_mm();
+        let data_graph = DataGraph::new(&data_graph_mm);
         let global_index = data_graph.index();
         let vertices = global_index.get(10);
         assert_eq!(vertices.len(), 1);
@@ -489,7 +490,8 @@ mod tests {
 
     #[test]
     fn test_frequency() {
-        let data_graph = create_triangle();
+        let data_graph_mm = create_triangle_mm();
+        let data_graph = DataGraph::new(&data_graph_mm);
         let global_index = data_graph.index();
         assert_eq!(global_index.get(0).len(), 0);
         assert_eq!(global_index.get(10).len(), 1);
@@ -498,7 +500,8 @@ mod tests {
 
     #[test]
     fn test_neighbor_elabels() {
-        let data_graph = create_star();
+        let data_graph_mm = create_star_mm();
+        let data_graph = DataGraph::new(&data_graph_mm);
         let n3 = data_graph
             .index()
             .get(1)
@@ -517,7 +520,8 @@ mod tests {
 
     #[test]
     fn test_neighbors() {
-        let data_graph = create_star();
+        let data_graph_mm = create_star_mm();
+        let data_graph = DataGraph::new(&data_graph_mm);
         let neighbor_vids: Vec<_> = data_graph
             .index()
             .get(1)

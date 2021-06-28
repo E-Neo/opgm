@@ -15,14 +15,14 @@ use std::mem::size_of;
 /// and we access to the specific parts by `ids`.
 /// In order to scan the `data_graph` only once, we group stars (characteristics) with the
 /// same root label (`vlabel`) together.
-pub fn match_characteristics<'a, G, GIdx, LIdx, VIter, NIter, V, N>(
-    data_graph: &'a G,
+pub fn match_characteristics<G, GIdx, LIdx, VIter, NIter, V, N>(
+    data_graph: &G,
     vlabel: VLabel,
     infos: &[CharacteristicInfo],
     super_row_mms: &mut [MemoryManager],
     index_mms: &mut [MemoryManager],
 ) where
-    G: Graph<'a, GIdx>,
+    G: Graph<GIdx>,
     GIdx: Index<VIter>,
     LIdx: Index<NIter>,
     VIter: VertexIter<V>,
@@ -329,7 +329,7 @@ mod tests {
         mm
     }
 
-    fn create_stars() -> DataGraph {
+    fn create_stars_mm() -> MemoryManager {
         let mut mm = MemoryManager::Mem(vec![]);
         let vertices = vec![
             (1, 0),
@@ -361,7 +361,7 @@ mod tests {
             vertices,
             edges,
         );
-        DataGraph::new(mm)
+        mm
     }
 
     fn create_pattern_graph() -> PatternGraph {
@@ -377,7 +377,8 @@ mod tests {
 
     #[test]
     fn test_super_row_index() {
-        let data_graph = create_stars();
+        let data_graph_mm = create_stars_mm();
+        let data_graph = DataGraph::new(&data_graph_mm);
         let pattern_graph = create_pattern_graph();
         let infos = vec![
             CharacteristicInfo::new(Characteristic::new(&pattern_graph, 1), 0),
@@ -442,7 +443,7 @@ mod tests {
         );
     }
 
-    fn create_data_graph_q02() -> DataGraph {
+    fn create_data_graph_q02_mm() -> MemoryManager {
         let vertices = vec![(1, 1), (2, 2), (3, 3), (4, 4), (11, 1), (14, 4)];
         let arcs = vec![(1, 2, 0), (2, 3, 0), (3, 4, 0), (3, 14, 0), (11, 2, 0)];
         let mut mm = MemoryManager::Mem(vec![]);
@@ -458,7 +459,7 @@ mod tests {
             vertices,
             arcs,
         );
-        DataGraph::new(mm)
+        mm
     }
 
     fn create_pattern_graph_q02() -> PatternGraph {
@@ -476,7 +477,8 @@ mod tests {
 
     #[test]
     fn test_q02() {
-        let data_graph = create_data_graph_q02();
+        let data_graph_mm = create_data_graph_q02_mm();
+        let data_graph = DataGraph::new(&data_graph_mm);
         let pattern_graph = create_pattern_graph_q02();
         let mut super_row_mms = vec![
             MemoryManager::Mem(vec![]),
