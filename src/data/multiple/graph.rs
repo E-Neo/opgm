@@ -15,9 +15,9 @@ use std::{collections::HashSet, mem::size_of};
 /// The underlying format of the data graph is:
 ///
 /// ```text
-/// +-----------------------------------------+
-/// |             num_vlabels: k              |
-/// +-----------------------------------------+
+/// +--------------------+--------------------+
+/// |       magic        |   num_vlabels: k   |
+/// +--------------------+--------------------+
 /// +-------------+-------------+-------------+
 /// |   vlabel    |     pos     |     len     |<-+
 /// +-------------+-------------+-------------+  |
@@ -71,10 +71,10 @@ impl<'a> DataGraph<'a> {
 
 impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
     fn index(&self) -> GlobalIndex<'a> {
-        let &num_vlabels = unsafe { self.mm.as_ref::<usize>(0) };
+        let &num_vlabels = unsafe { self.mm.as_ref::<u64>(size_of::<u64>()) };
         GlobalIndex {
             mm: &self.mm,
-            index: unsafe { self.mm.as_slice(size_of::<usize>(), num_vlabels) },
+            index: unsafe { self.mm.as_slice(2 * size_of::<u64>(), num_vlabels as usize) },
         }
     }
 

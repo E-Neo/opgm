@@ -43,14 +43,14 @@ impl ScanMethod {
     }
 }
 
-pub enum Job {
+pub enum JoinMethod {
     CountRows,
 }
 
-impl Job {
+impl JoinMethod {
     fn new(job: &str) -> Self {
         match job {
-            "count-rows" => Job::CountRows,
+            "count-rows" => JoinMethod::CountRows,
             _ => unreachable!(),
         }
     }
@@ -73,7 +73,7 @@ where
     index_type: IndexType,
     roots: Option<Vec<VId>>,
     scan_method: ScanMethod,
-    job: Job,
+    job: JoinMethod,
     _phantom_gidx: PhantomData<GIdx>,
     _phantom_lidx: PhantomData<LIdx>,
     _phantom_viter: PhantomData<VIter>,
@@ -102,7 +102,7 @@ where
         index_type: &str,
         roots: Option<Vec<VId>>,
         scan_method: &str,
-        job: &str,
+        join_method: &str,
     ) -> Self {
         Self {
             data,
@@ -116,7 +116,7 @@ where
             },
             roots,
             scan_method: ScanMethod::new(scan_method),
-            job: Job::new(job),
+            job: JoinMethod::new(join_method),
             _phantom_gidx: PhantomData,
             _phantom_lidx: PhantomData,
             _phantom_viter: PhantomData,
@@ -170,7 +170,7 @@ where
         }
         let time_now = Instant::now();
         match self.job {
-            Job::CountRows => {
+            JoinMethod::CountRows => {
                 let num_rows = match sr_mms.as_slice() {
                     [] => 0,
                     [sr_mm] => {

@@ -20,8 +20,8 @@ fn handle_createdb(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
 
 fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
     let data_mm = MemoryManager::new_mmap(matches.value_of("DATAGRAPH").unwrap())?;
-    let info = match matches.value_of("FMT").unwrap() {
-        "multiple" => multiple::DataGraph::new(&data_mm).info(),
+    let info = match unsafe { data_mm.as_ref::<u64>(0) } {
+        0x1949 => multiple::DataGraph::new(&data_mm).info(),
         _ => unreachable!(),
     };
     println!("{}", info);
@@ -30,9 +30,9 @@ fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
 
 fn handle_run(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let data_mm = MemoryManager::new_mmap(matches.value_of("DATAGRAPH").unwrap())?;
-    let data = match matches.value_of("FMT").unwrap() {
-        "multiple" => multiple::DataGraph::new(&data_mm),
-        _ => unreachable!(),
+    let data = match unsafe { data_mm.as_ref::<u64>(0) } {
+        0x1949 => multiple::DataGraph::new(&data_mm),
+        _ => panic!("unrecognized data graph format"),
     };
     Task::new(
         data,
@@ -44,7 +44,7 @@ fn handle_run(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
         matches.value_of("INDEX-TYPE").unwrap(),
         None,
         matches.value_of("SCAN-METHOD").unwrap(),
-        matches.value_of("JOB").unwrap(),
+        matches.value_of("JOIN-METHOD").unwrap(),
     )
     .run()
 }
@@ -69,12 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (@arg PATH: *))
         (@subcommand dbinfo =>
             (about: "Displays information about the data graph")
-            (@arg FMT: * possible_value[multiple])
             (@arg DATAGRAPH: *))
         (@subcommand run =>
             (about: "Evaluate the graph matching query")
-            (@arg JOB: * possible_value("count-rows"))
-            (@arg FMT: * possible_value[multiple])
             (@arg DATAGRAPH: *)
             (@arg QUERY: *)
             (@arg DIRECTORY: --directory +takes_value default_value(temp_dir.to_str().unwrap()))
@@ -85,7 +82,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                   possible_value[mem mmap sink])
             (@arg ("INDEX-TYPE"): --("index-type") default_value[hash] possible_value[sorted hash])
             (@arg ("SCAN-METHOD"): --("scan-method") default_value("vertex-centric")
-                  possible_value("vertex-centric")))
+                  possible_value("vertex-centric"))
+            (@arg ("JOIN-METHOD"): --("join-method") default_value("count-rows")
+                  possible_value("count-rows")))
     ).get_matches();
     if let Some(matches) = matches.subcommand_matches("createdb") {
         handle_createdb(matches)?;

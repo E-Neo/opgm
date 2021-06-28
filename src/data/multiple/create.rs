@@ -33,14 +33,15 @@ where
         num_edges,
     ));
     unsafe {
-        mm.copy_from_slice(0, &[num_vlabels]);
+        mm.copy_from_slice::<u64>(0, &[0x1949]);
+        mm.copy_from_slice::<u64>(size_of::<u64>(), &[num_vlabels as u64]);
     }
-    let mut pos = size_of::<usize>() + num_vlabels * size_of::<VLabelPosLen>();
+    let mut pos = 2 * size_of::<u64>() + num_vlabels * size_of::<VLabelPosLen>();
     for (i, (vlabel, vlabel_group)) in GroupBy::new(info_edges, |e| e.0).enumerate() {
         let (new_pos, len) = write_vertices(mm, pos, vlabel_group);
         write_index_entry(
             mm,
-            size_of::<usize>() + i * size_of::<VLabelPosLen>(),
+            2 * size_of::<u64>() + i * size_of::<VLabelPosLen>(),
             vlabel,
             pos,
             len,
@@ -87,7 +88,7 @@ pub fn mm_from_sqlite(mm: &mut MemoryManager, conn: &rusqlite::Connection) -> ru
 
 fn estimate_datagraph_size(num_vlabels: usize, num_vertices: usize, num_edges: usize) -> usize {
     let vlabel_pos_len_size = size_of::<VLabelPosLen>() * num_vlabels;
-    let header_size = size_of::<usize>() + vlabel_pos_len_size;
+    let header_size = 2 * size_of::<u64>() + vlabel_pos_len_size;
     let vertex_header_size = size_of::<VertexHeader>() * num_vertices;
     let vertex_vlabel_pos_len_size = vlabel_pos_len_size * num_vertices;
     let neighbor_header_size = size_of::<NeighborHeader>() * num_edges * 2;
