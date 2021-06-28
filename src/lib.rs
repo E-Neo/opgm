@@ -1,6 +1,7 @@
 //! Out-of-core property graph matching.
 
 pub mod compiler;
+pub mod data;
 pub mod data_graph;
 pub mod executor;
 pub mod front_end;

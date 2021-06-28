@@ -1,5 +1,5 @@
 use crate::{
-    data_graph::{Graph, Index, Neighbor, NeighborIter, Vertex, VertexIter},
+    data::{Graph, Index, Neighbor, NeighborIter, Vertex, VertexIter},
     executor::{write_index, write_num_bytes, write_pos_len, write_super_row_header, write_vid},
     memory_manager::MemoryManager,
     pattern::NeighborInfo,
@@ -317,11 +317,10 @@ fn finish_results(
 mod tests {
     use super::*;
     use crate::{
-        data_graph::{mm_read_iter, multiple::DataGraph},
+        data::multiple::{create::mm_from_iter, DataGraph},
         executor::{add_super_row_and_index, empty_super_row_mm, SuperRowIndexView, SuperRowsView},
         pattern::{Characteristic, PatternGraph},
     };
-    use std::collections::HashSet;
 
     fn create_super_row_mm(num_eqvs: usize, num_cover: usize) -> MemoryManager {
         let mut mm = MemoryManager::Mem(vec![]);
@@ -349,18 +348,7 @@ mod tests {
             (5, 7, 0),
             (5, 8, 0),
         ];
-        mm_read_iter(
-            &mut mm,
-            vertices
-                .iter()
-                .map(|&(_, vlabel)| vlabel)
-                .collect::<HashSet<_>>()
-                .len(),
-            vertices.len(),
-            edges.len(),
-            vertices,
-            edges,
-        );
+        mm_from_iter(&mut mm, vertices.into_iter(), edges.into_iter());
         mm
     }
 
@@ -447,18 +435,7 @@ mod tests {
         let vertices = vec![(1, 1), (2, 2), (3, 3), (4, 4), (11, 1), (14, 4)];
         let arcs = vec![(1, 2, 0), (2, 3, 0), (3, 4, 0), (3, 14, 0), (11, 2, 0)];
         let mut mm = MemoryManager::Mem(vec![]);
-        mm_read_iter(
-            &mut mm,
-            vertices
-                .iter()
-                .map(|&(_, l)| l)
-                .collect::<HashSet<_>>()
-                .len(),
-            vertices.len(),
-            arcs.len(),
-            vertices,
-            arcs,
-        );
+        mm_from_iter(&mut mm, vertices.into_iter(), arcs.into_iter());
         mm
     }
 
