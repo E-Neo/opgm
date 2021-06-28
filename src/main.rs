@@ -36,7 +36,11 @@ fn handle_run(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     };
     Task::new(
         data,
-        std::fs::read_to_string(matches.value_of("QUERY").unwrap())?,
+        if let Some(query_path) = matches.value_of("QUERY_PATH") {
+            std::fs::read_to_string(query_path)?
+        } else {
+            String::from(matches.value_of("QUERY").unwrap())
+        },
         matches.value_of("DIRECTORY").unwrap(),
         matches.value_of("NAME").unwrap(),
         matches.value_of("SR-MM-TYPE").unwrap(),
@@ -66,25 +70,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ")
             (@arg FMT: * possible_value[multiple])
             (@arg SQLITE: *)
-            (@arg PATH: *))
+            (@arg PATH: *)
+        )
         (@subcommand dbinfo =>
             (about: "Displays information about the data graph")
-            (@arg DATAGRAPH: *))
+            (@arg DATAGRAPH: *)
+        )
         (@subcommand run =>
             (about: "Evaluate the graph matching query")
             (@arg DATAGRAPH: *)
-            (@arg QUERY: *)
+            (@group INPUT +required =>
+                (@arg QUERY_PATH:)
+                (@arg QUERY: -e --execute +takes_value)
+            )
             (@arg DIRECTORY: --directory +takes_value default_value(temp_dir.to_str().unwrap()))
             (@arg NAME: --name +takes_value default_value[opgm])
             (@arg ("SR-MM-TYPE"): --("sr-mm-type") +takes_value default_value[mmap]
                   possible_value[mem mmap sink])
-            (@arg ("INDEX-MM-TYPE"): --("index-mm-type") default_value[mmap]
+            (@arg ("INDEX-MM-TYPE"): --("index-mm-type") +takes_value default_value[mmap]
                   possible_value[mem mmap sink])
-            (@arg ("INDEX-TYPE"): --("index-type") default_value[hash] possible_value[sorted hash])
-            (@arg ("SCAN-METHOD"): --("scan-method") default_value("vertex-centric")
+            (@arg ("INDEX-TYPE"): --("index-type") +takes_value default_value[hash]
+                  possible_value[sorted hash])
+            (@arg ("SCAN-METHOD"): --("scan-method") +takes_value default_value("vertex-centric")
                   possible_value("vertex-centric"))
-            (@arg ("JOIN-METHOD"): --("join-method") default_value("count-rows")
-                  possible_value("count-rows")))
+            (@arg ("JOIN-METHOD"): --("join-method") +takes_value default_value("count-rows")
+                  possible_values(&["count-rows", "count-rows-slow"]))
+        )
     ).get_matches();
     if let Some(matches) = matches.subcommand_matches("createdb") {
         handle_createdb(matches)?;

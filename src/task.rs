@@ -3,7 +3,7 @@ use itertools::Itertools;
 use crate::{
     data::{Graph, Index, Neighbor, NeighborIter, Vertex, VertexIter},
     executor::{
-        count::{count_rows_join, count_rows_star},
+        count::{count_rows_join, count_rows_slow_join, count_rows_slow_star, count_rows_star},
         scan::vertex_centric,
     },
     front_end::{check, codegen, parse, rewrite},
@@ -45,12 +45,14 @@ impl ScanMethod {
 
 pub enum JoinMethod {
     CountRows,
+    CountRowsSlow,
 }
 
 impl JoinMethod {
     fn new(job: &str) -> Self {
         match job {
             "count-rows" => JoinMethod::CountRows,
+            "count-rows-slow" => JoinMethod::CountRowsSlow,
             _ => unreachable!(),
         }
     }
@@ -187,6 +189,27 @@ where
                         eprintln!("indexed_joins: {:?}", join_plan.indexed_joins());
                         eprintln!("intersections: {:?}", join_plan.intersections());
                         count_rows_join(&sr_mms, &index_mms, &join_plan)
+                    }
+                };
+                eprintln!("num_rows: {}", num_rows);
+            }
+            JoinMethod::CountRowsSlow => {
+                let num_rows = match sr_mms.as_slice() {
+                    [] => 0,
+                    [sr_mm] => {
+                        let mut vertex_eqv: Vec<_> = scan_plan.stars()[0]
+                            .vertex_eqv()
+                            .iter()
+                            .map(|(&vid, &eqv)| (vid, eqv))
+                            .collect();
+                        vertex_eqv.sort();
+                        count_rows_slow_star(sr_mm, &vertex_eqv)
+                    }
+                    _ => {
+                        let join_plan = JoinPlan::new(&pattern, self.index_type, scan_plan.stars());
+                        eprintln!("indexed_joins: {:?}", join_plan.indexed_joins());
+                        eprintln!("intersections: {:?}", join_plan.intersections());
+                        count_rows_slow_join(&sr_mms, &index_mms, &join_plan)
                     }
                 };
                 eprintln!("num_rows: {}", num_rows);
