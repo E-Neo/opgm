@@ -1,5 +1,5 @@
-use crate::{data::Graph, pattern::PatternGraph, types::VId};
-use std::{collections::HashMap, marker::PhantomData};
+use crate::{data_graph::DataGraph, pattern_graph::PatternGraph, types::VId};
+use std::collections::HashMap;
 
 /// The selection value of a vertex.
 ///
@@ -13,7 +13,7 @@ struct VertexValue {
 }
 
 impl VertexValue {
-    fn new<G: Graph<GIdx>, GIdx>(d: &G, p: &PatternGraph, u: VId) -> Self {
+    fn new(d: &DataGraph, p: &PatternGraph, u: VId) -> Self {
         let (mut deg, mut num_constraints) = (0, p.vertex_constraint(u).unwrap().map_or(0, |_| 1));
         for (_, info) in p.neighbors(u).unwrap() {
             deg += info.v_to_n_elabels().len()
@@ -25,7 +25,7 @@ impl VertexValue {
         Self {
             deg: deg as i64,
             num_constraints,
-            neg_vlabel_freq: -(d.count(p.vlabel(u).unwrap()) as i64),
+            neg_vlabel_freq: -(d.frequency(p.vlabel(u).unwrap()) as i64),
             neg_vid: -u,
         }
     }
@@ -35,31 +35,28 @@ impl VertexValue {
     }
 }
 
-struct Candidates<'a, G: Graph<GIdx>, GIdx> {
-    d: &'a G,
-    p: &'a PatternGraph,
-    graph: PatternGraph,
+struct Candidates<'a, 'b> {
+    d: &'a DataGraph,
+    p: &'a PatternGraph<'b>,
+    graph: PatternGraph<'b>,
     vid_values: HashMap<VId, VertexValue>,
-    _phantom: PhantomData<GIdx>,
 }
 
-impl<'a, G: Graph<GIdx>, GIdx> Candidates<'a, G, GIdx> {
+impl<'a, 'b> Candidates<'a, 'b> {
     /// Selects one vertex in `p` and makes it the only item in the new candidates.
-    fn new(d: &'a G, p: &'a PatternGraph) -> Self {
+    fn new(d: &'a DataGraph, p: &'a PatternGraph<'b>) -> Self {
         Self {
             d,
             p,
             graph: p.clone(),
             vid_values: std::iter::once(
                 p.vertices()
-                    .into_iter()
                     .map(|(u, _)| (VertexValue::new(d, p, u), u))
                     .max()
                     .map(|(val, key)| (key, val))
                     .unwrap(),
             )
             .collect(),
-            _phantom: PhantomData,
         }
     }
 
@@ -104,7 +101,7 @@ impl<'a, G: Graph<GIdx>, GIdx> Candidates<'a, G, GIdx> {
 /// Returns a vector of roots that can be used to create stars.
 ///
 /// The order of the returning vector matters for the join operation.
-pub fn decompose_stars<'a, G: Graph<GIdx>, GIdx>(d: &G, p: &PatternGraph) -> Vec<VId> {
+pub fn decompose_stars<'a>(d: &DataGraph, p: &PatternGraph<'a>) -> Vec<VId> {
     let mut roots = Vec::new();
     let mut candidates = Candidates::new(d, p);
     while !candidates.is_empty() {
@@ -116,17 +113,16 @@ pub fn decompose_stars<'a, G: Graph<GIdx>, GIdx>(d: &G, p: &PatternGraph) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::multiple::create::mm_from_iter;
-    use crate::data::multiple::DataGraph;
+    use crate::data_graph::mm_read_iter;
     use crate::memory_manager::MemoryManager;
 
-    fn create_empty_data_graph_mm() -> MemoryManager {
+    fn create_empty_data_graph() -> DataGraph {
         let mut mm = MemoryManager::Mem(vec![]);
-        mm_from_iter(&mut mm, std::iter::empty(), std::iter::empty());
-        mm
+        mm_read_iter(&mut mm, 0, 0, 0, vec![], vec![]);
+        DataGraph::new(mm)
     }
 
-    fn create_rectangle() -> PatternGraph {
+    fn create_rectangle() -> PatternGraph<'static> {
         let mut p = PatternGraph::new();
         p.add_vertex(1, 0);
         p.add_vertex(2, 0);
@@ -139,7 +135,7 @@ mod tests {
         p
     }
 
-    fn create_diamond() -> PatternGraph {
+    fn create_diamond() -> PatternGraph<'static> {
         let mut p = PatternGraph::new();
         p.add_vertex(1, 0);
         p.add_vertex(2, 0);
@@ -153,7 +149,7 @@ mod tests {
         p
     }
 
-    fn create_diamond2() -> PatternGraph {
+    fn create_diamond2() -> PatternGraph<'static> {
         let mut p = PatternGraph::new();
         p.add_vertex(1, 1);
         p.add_vertex(2, 1);
@@ -172,8 +168,7 @@ mod tests {
 
     #[test]
     fn test_decompose_rectangle() {
-        let d_mm = create_empty_data_graph_mm();
-        let d = DataGraph::new(&d_mm);
+        let d = create_empty_data_graph();
         let p = create_rectangle();
         let roots = decompose_stars(&d, &p);
         assert_eq!(roots, [1, 2, 3]);
@@ -181,16 +176,14 @@ mod tests {
 
     #[test]
     fn test_decompose_diamond() {
-        let d_mm = create_empty_data_graph_mm();
-        let d = DataGraph::new(&d_mm);
+        let d = create_empty_data_graph();
         let p = create_diamond();
         assert_eq!(decompose_stars(&d, &p), &[1, 3]);
     }
 
     #[test]
     fn test_decompose_diamond2() {
-        let d_mm = create_empty_data_graph_mm();
-        let d = DataGraph::new(&d_mm);
+        let d = create_empty_data_graph();
         let p = create_diamond2();
         assert_eq!(decompose_stars(&d, &p), &[1, 4]);
     }

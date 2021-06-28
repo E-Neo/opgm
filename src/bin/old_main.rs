@@ -8,7 +8,7 @@ use opgm::{
     data_graph::{DataGraph, DataGraphInfo},
     executor::{count_rows, count_rows_slow, enumerate, SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile},
-    planner::{IndexType, MemoryManagerType, Plan, Task},
+    old_planner::{IndexType, MemoryManagerType, Plan, Task},
     types::VId,
 };
 use std::{

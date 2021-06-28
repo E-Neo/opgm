@@ -8,12 +8,12 @@ use crate::{
     data_graph::DataGraph,
     executor::{join, match_characteristics, read_super_row_header, JoinedSuperRows},
     memory_manager::{MemoryManager, MmapMutFile},
-    pattern_graph::{Characteristic, PatternGraph},
-    planner::{
+    old_planner::{
         decompose_stars,
         old_types::{CharacteristicInfo, StarInfo},
         IndexType,
     },
+    pattern_graph::{Characteristic, PatternGraph},
     types::{GlobalConstraint, VId, VLabel},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};

@@ -1,7 +1,7 @@
 use crate::{
     executor::{count_rows_slow_helper, read_super_row_header, SuperRow, SuperRows},
     memory_manager::MemoryManager,
-    planner::{IndexType, IndexedJoinPlan, IntersectionPlan, JoinPlan},
+    old_planner::{IndexType, IndexedJoinPlan, IntersectionPlan, JoinPlan},
     types::{VId, VIdPos},
 };
 use std::{collections::HashMap, mem::size_of};

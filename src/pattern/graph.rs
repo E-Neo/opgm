@@ -74,6 +74,7 @@ impl NeighborInfo {
     }
 }
 
+#[derive(Clone)]
 struct GraphNode {
     vlabel: VLabel,
     in_deg: usize,
@@ -127,6 +128,7 @@ impl GraphNode {
     }
 }
 
+#[derive(Clone)]
 pub struct PatternGraph {
     vertices: HashMap<VId, GraphNode>,
 }

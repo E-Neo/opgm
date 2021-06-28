@@ -16,6 +16,8 @@ mod view;
 pub trait Graph<I> {
     fn index(&self) -> I;
 
+    fn count(&self, label: VLabel) -> usize;
+
     fn info(&self) -> GraphInfo;
 
     fn view(&self) -> GraphView;

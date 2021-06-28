@@ -78,6 +78,10 @@ impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
         }
     }
 
+    fn count(&self, label: VLabel) -> usize {
+        self.index().get(label).len()
+    }
+
     fn info(&self) -> GraphInfo {
         let (mut num_vertices, mut num_edges) = (0, 0);
         let mut elabels = HashSet::new();

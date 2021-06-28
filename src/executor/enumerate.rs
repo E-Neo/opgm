@@ -1,7 +1,7 @@
 use crate::{
     executor::{create_indices, OneJoin, SuperRows},
     memory_manager::MemoryManager,
-    planner::{JoinPlan, Plan},
+    old_planner::{JoinPlan, Plan},
     types::VId,
 };
 use std::io::Write;
