@@ -6,8 +6,8 @@ use crate::{
         generator::{extract_global_constraint, EdgeConstraintsInfo, VertexConstraintsInfo},
     },
     data_graph::DataGraph,
-    executor::{join, match_characteristics, read_super_row_header, JoinedSuperRows},
     memory_manager::{MemoryManager, MmapMutFile},
+    old_executor::{join, match_characteristics, read_super_row_header, JoinedSuperRows},
     old_planner::{
         decompose_stars,
         old_types::{CharacteristicInfo, StarInfo},

@@ -169,6 +169,20 @@ mod tests {
         assert_eq!(
             parse(
                 "\
+(match (vertices (u1 0) (u2 0))
+       (arcs (u1 u2 0)))
+"
+            ),
+            Ok(Ast::new(
+                vec![(1, 0), (2, 0)],
+                vec![(1, 2, 0)],
+                vec![],
+                None
+            ))
+        );
+        assert_eq!(
+            parse(
+                "\
 (match (vertices (u1 1) (u2 2) (u3 3))
        (arcs  (u1 u2 12) (u1 u3 13))
        (edges (u1 u3 13) (u2 u3 23)))

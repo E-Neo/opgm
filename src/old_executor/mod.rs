@@ -1,6 +1,8 @@
 //! The executor.
 
+pub use count::{count_rows, count_rows_slow};
 pub use decompress::{decompress, write_results};
+pub use enumerate::enumerate;
 pub use join::{
     create_indices, join, Index, Intersection, JoinedSuperRow, JoinedSuperRowIter, JoinedSuperRows,
     OneJoin,
@@ -17,10 +19,11 @@ pub(crate) use super_row::{
     write_vid,
 };
 
-pub mod count;
 pub mod scan;
 
+mod count;
 mod decompress;
+mod enumerate;
 mod join;
 mod match_characteristics;
 mod super_row;

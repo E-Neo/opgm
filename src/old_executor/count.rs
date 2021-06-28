@@ -1,19 +1,19 @@
 use crate::{
-    executor::{create_indices, OneJoin, SuperRows},
     memory_manager::MemoryManager,
-    planner::join::JoinPlan,
+    old_executor::{create_indices, OneJoin, SuperRows},
+    old_planner::{JoinPlan, Plan},
     types::VId,
 };
 use rayon::prelude::*;
 
-pub fn count_rows_star(super_row_mm: &MemoryManager, vertex_eqv: &[(VId, usize)]) -> usize {
+fn count_rows_star(super_row_mm: &MemoryManager, vertex_eqv: &[(VId, usize)]) -> usize {
     SuperRows::new(super_row_mm)
         .par_bridge()
         .map(|sr| sr.count_rows(vertex_eqv))
         .sum()
 }
 
-pub fn count_rows_join<'a, 'b>(
+fn count_rows_join<'a, 'b>(
     super_row_mms: &'a [MemoryManager],
     index_mms: &'a [MemoryManager],
     plan: &'b JoinPlan,
@@ -36,14 +36,34 @@ pub fn count_rows_join<'a, 'b>(
         .sum()
 }
 
-pub fn count_rows_slow_star(super_row_mm: &MemoryManager, vertex_eqv: &[(VId, usize)]) -> usize {
+pub fn count_rows<'a, 'b>(
+    super_row_mms: &'a [MemoryManager],
+    index_mms: &'a [MemoryManager],
+    plan: &'b Plan,
+) -> usize {
+    match plan.stars().len() {
+        0 => 0,
+        1 => {
+            let mut vertex_eqv: Vec<_> = plan.stars()[0]
+                .vertex_eqv()
+                .iter()
+                .map(|(&vid, &eqv)| (vid, eqv))
+                .collect();
+            vertex_eqv.sort();
+            count_rows_star(&super_row_mms[0], &vertex_eqv)
+        }
+        _ => count_rows_join(super_row_mms, index_mms, plan.join_plan().unwrap()),
+    }
+}
+
+fn count_rows_slow_star(super_row_mm: &MemoryManager, vertex_eqv: &[(VId, usize)]) -> usize {
     SuperRows::new(super_row_mm)
         .par_bridge()
         .map(|sr| sr.count_rows_slow(vertex_eqv))
         .sum()
 }
 
-pub fn count_rows_slow_join<'a, 'b>(
+fn count_rows_slow_join<'a, 'b>(
     super_row_mms: &'a [MemoryManager],
     index_mms: &'a [MemoryManager],
     plan: &'b JoinPlan,
@@ -64,4 +84,24 @@ pub fn count_rows_slow_join<'a, 'b>(
             .sum::<usize>()
         })
         .sum()
+}
+
+pub fn count_rows_slow<'a, 'b>(
+    super_row_mms: &'a [MemoryManager],
+    index_mms: &'a [MemoryManager],
+    plan: &'b Plan,
+) -> usize {
+    match plan.stars().len() {
+        0 => 0,
+        1 => {
+            let mut vertex_eqv: Vec<_> = plan.stars()[0]
+                .vertex_eqv()
+                .iter()
+                .map(|(&vid, &eqv)| (vid, eqv))
+                .collect();
+            vertex_eqv.sort();
+            count_rows_slow_star(&super_row_mms[0], &vertex_eqv)
+        }
+        _ => count_rows_slow_join(super_row_mms, index_mms, plan.join_plan().unwrap()),
+    }
 }

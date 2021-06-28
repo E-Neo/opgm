@@ -1,12 +1,13 @@
 use crate::{
     pattern::{Characteristic, PatternGraph},
-    planner::CharacteristicInfo,
+    planner::{CharacteristicInfo, StarInfo},
     types::{VId, VLabel},
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub struct ScanPlan {
     plan: Vec<(VLabel, Vec<CharacteristicInfo>)>,
+    stars: Vec<StarInfo>,
 }
 
 impl ScanPlan {
@@ -28,7 +29,12 @@ impl ScanPlan {
                 .into_iter()
                 .map(|(vlabel, xs)| (vlabel, xs.into_iter().collect::<Vec<_>>()))
                 .collect(),
+            stars: create_stars(pattern_graph, roots, &characteristic_id_map),
         }
+    }
+
+    pub fn stars(&self) -> &[StarInfo] {
+        &self.stars
     }
 
     pub fn plan(&self) -> &[(VLabel, Vec<CharacteristicInfo>)] {
@@ -52,6 +58,25 @@ fn create_characteristic_id_map(
             });
     }
     characteristic_id_map
+}
+
+fn create_stars(
+    pattern_graph: &PatternGraph,
+    roots: &[VId],
+    characteristic_ids: &HashMap<Characteristic, usize>,
+) -> Vec<StarInfo> {
+    roots
+        .iter()
+        .map(|&root| {
+            StarInfo::new(
+                pattern_graph,
+                root,
+                *characteristic_ids
+                    .get(&Characteristic::new(pattern_graph, root))
+                    .unwrap(),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

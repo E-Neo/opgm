@@ -6,8 +6,8 @@ use derive_more::Display;
 use opgm::{
     compiler::compiler::compile,
     data_graph::{DataGraph, DataGraphInfo},
-    executor::{count_rows, count_rows_slow, enumerate, SuperRows, SuperRowsInfo},
     memory_manager::{MemoryManager, MmapFile},
+    old_executor::{count_rows, count_rows_slow, enumerate, SuperRows, SuperRowsInfo},
     old_planner::{IndexType, MemoryManagerType, Plan, Task},
     types::VId,
 };

@@ -1,6 +1,6 @@
 use crate::{
-    executor::{create_indices, OneJoin, SuperRows},
     memory_manager::MemoryManager,
+    old_executor::{create_indices, OneJoin, SuperRows},
     old_planner::{JoinPlan, Plan},
     types::VId,
 };
