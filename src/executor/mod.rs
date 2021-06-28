@@ -5,7 +5,6 @@ pub use join::{
     create_indices, join, Index, Intersection, JoinedSuperRow, JoinedSuperRowIter, JoinedSuperRows,
     OneJoin,
 };
-pub use match_characteristics::match_characteristics;
 pub use super_row::{
     add_super_row, add_super_row_and_index, add_super_row_and_index_compact, empty_super_row_mm,
     SuperRow, SuperRowIter, SuperRows, SuperRowsInfo,
@@ -22,7 +21,6 @@ pub mod scan;
 
 mod decompress;
 mod join;
-mod match_characteristics;
 mod super_row;
 mod view;
 

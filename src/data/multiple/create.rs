@@ -281,7 +281,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_graph::{multiple::DataGraph, Graph, GraphView};
+    use crate::data::{multiple::DataGraph, Graph, GraphView};
     use rusqlite::params;
     use std::mem::size_of;
 

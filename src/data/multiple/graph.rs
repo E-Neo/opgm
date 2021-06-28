@@ -435,17 +435,14 @@ pub struct DataGraphInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_graph::mm_read_iter;
+    use crate::data::multiple::create::mm_from_iter;
 
     fn create_triangle_mm() -> MemoryManager {
         let mut mm = MemoryManager::Mem(vec![]);
-        mm_read_iter(
+        mm_from_iter(
             &mut mm,
-            2,
-            3,
-            4,
-            vec![(1, 10), (2, 20), (3, 20)],
-            vec![(1, 2, 12), (1, 3, 13), (2, 3, 23), (3, 2, 32)],
+            vec![(1, 10), (2, 20), (3, 20)].into_iter(),
+            vec![(1, 2, 12), (1, 3, 13), (2, 3, 23), (3, 2, 32)].into_iter(),
         );
         mm
     }
@@ -462,7 +459,7 @@ mod tests {
             (1, 5, 2),
             (1, 6, 2),
         ];
-        mm_read_iter(&mut mm, 3, vertices.len(), edges.len(), vertices, edges);
+        mm_from_iter(&mut mm, vertices.into_iter(), edges.into_iter());
         mm
     }
 
