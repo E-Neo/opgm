@@ -87,7 +87,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (@arg QUERY_PATH:)
                 (@arg QUERY: -e --execute +takes_value)
             )
-            (@arg DIRECTORY: --directory +takes_value default_value(temp_dir.to_str().unwrap()))
+            (@arg DIRECTORY: --directory +takes_value
+                  default_value(temp_dir.to_str().ok_or("temp dir")?))
             (@arg NAME: --name +takes_value default_value[opgm])
             (@arg ("SR-MM-TYPE"): --("sr-mm-type") +takes_value default_value[mmap]
                   possible_value[mem mmap sink])

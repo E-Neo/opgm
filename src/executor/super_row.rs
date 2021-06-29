@@ -208,14 +208,12 @@ impl std::fmt::Display for SuperRowsInfo {
 }
 
 pub(crate) fn read_super_row_header(super_row_mm: &MemoryManager) -> (usize, usize, usize) {
-    let header = super_row_mm.read::<SuperRowHeader>(0);
-    unsafe {
-        (
-            (*header).num_rows as usize,
-            (*header).num_eqvs as usize,
-            (*header).num_vertices as usize,
-        )
-    }
+    let header = unsafe { super_row_mm.as_ref::<SuperRowHeader>(0) };
+    (
+        header.num_rows as usize,
+        header.num_eqvs as usize,
+        header.num_vertices as usize,
+    )
 }
 
 fn read_pos_lens(super_row_mm: &MemoryManager, sr_pos: usize, num_eqvs: usize) -> &[PosLen] {
@@ -223,7 +221,7 @@ fn read_pos_lens(super_row_mm: &MemoryManager, sr_pos: usize, num_eqvs: usize) -
 }
 
 fn read_usize(mm: &MemoryManager, pos: usize) -> usize {
-    unsafe { *mm.read::<usize>(pos) }
+    unsafe { *mm.as_ref::<usize>(pos) }
 }
 
 pub(crate) fn write_super_row_header(
@@ -232,19 +230,22 @@ pub(crate) fn write_super_row_header(
     num_eqvs: usize,
     num_vertices: usize,
 ) {
-    super_row_mm.write(
-        0,
-        &SuperRowHeader {
-            num_rows: num_rows as u32,
-            num_eqvs: num_eqvs as u32,
-            num_vertices: num_vertices as u32,
-        } as *const SuperRowHeader,
-        1,
-    );
+    unsafe {
+        super_row_mm.copy_from_slice(
+            0,
+            &[SuperRowHeader {
+                num_rows: num_rows as u32,
+                num_eqvs: num_eqvs as u32,
+                num_vertices: num_vertices as u32,
+            }],
+        );
+    }
 }
 
 pub(crate) fn write_num_bytes(super_row_mm: &mut MemoryManager, sr_pos: usize, num_bytes: usize) {
-    super_row_mm.write(sr_pos, &num_bytes as *const _, 1);
+    unsafe {
+        super_row_mm.copy_from_slice(sr_pos, &[num_bytes]);
+    }
 }
 
 pub(crate) fn write_pos_len(
@@ -254,36 +255,42 @@ pub(crate) fn write_pos_len(
     pos: usize,
     len: usize,
 ) {
-    super_row_mm.write(
-        sr_pos + size_of::<usize>() + eqv * size_of::<PosLen>(),
-        &PosLen { pos, len } as *const _,
-        1,
-    );
+    unsafe {
+        super_row_mm.copy_from_slice(
+            sr_pos + size_of::<usize>() + eqv * size_of::<PosLen>(),
+            &[PosLen { pos, len }],
+        );
+    }
 }
 
 pub(crate) fn write_vid(super_row_mm: &mut MemoryManager, pos: usize, vid: VId) {
-    super_row_mm.write(pos, &vid as *const _, 1);
+    unsafe {
+        super_row_mm.copy_from_slice(pos, &[vid]);
+    }
 }
 
 pub(crate) fn write_index(index_mm: &mut MemoryManager, idx_pos: usize, vid: VId, pos: usize) {
-    index_mm.write(idx_pos, &VIdPos { vid, pos } as *const _, 1);
+    unsafe {
+        index_mm.copy_from_slice(idx_pos, &[VIdPos { vid, pos }]);
+    }
 }
 
 pub fn empty_super_row_mm(super_row_mm: &mut MemoryManager, num_eqvs: usize, num_vertices: usize) {
     super_row_mm.resize(size_of::<SuperRowHeader>());
-    super_row_mm.write(
-        0,
-        &SuperRowHeader {
-            num_rows: 0,
-            num_eqvs: num_eqvs as u32,
-            num_vertices: num_vertices as u32,
-        } as *const _,
-        1,
-    );
+    unsafe {
+        super_row_mm.copy_from_slice(
+            0,
+            &[SuperRowHeader {
+                num_rows: 0,
+                num_eqvs: num_eqvs as u32,
+                num_vertices: num_vertices as u32,
+            }],
+        );
+    }
 }
 
 pub fn add_super_row(super_row_mm: &mut MemoryManager, bounds: &[usize], super_row: &[&[VId]]) {
-    let header = unsafe { &*super_row_mm.read::<SuperRowHeader>(0) };
+    let header = unsafe { super_row_mm.as_ref::<SuperRowHeader>(0) };
     let (num_rows, num_eqvs, num_vertices) =
         (header.num_rows, header.num_eqvs, header.num_vertices);
     let sr_pos = super_row_mm.len();
@@ -292,15 +299,16 @@ pub fn add_super_row(super_row_mm: &mut MemoryManager, bounds: &[usize], super_r
     write_num_bytes(super_row_mm, sr_pos, num_bytes);
     let mut pos = sr_pos + size_of::<usize>() + num_eqvs as usize * size_of::<PosLen>();
     for (eqv, (&bound, &img)) in bounds.iter().zip(super_row).enumerate() {
-        super_row_mm.write(
-            sr_pos + size_of::<usize>() + eqv * size_of::<PosLen>(),
-            &PosLen {
-                pos,
-                len: img.len(),
-            } as *const _,
-            1,
-        );
-        super_row_mm.write(pos, img.as_ptr(), img.len());
+        unsafe {
+            super_row_mm.copy_from_slice(
+                sr_pos + size_of::<usize>() + eqv * size_of::<PosLen>(),
+                &[PosLen {
+                    pos,
+                    len: img.len(),
+                }],
+            );
+            super_row_mm.copy_from_slice(pos, img);
+        }
         pos += bound * size_of::<VId>();
     }
     write_super_row_header(
@@ -321,14 +329,15 @@ pub fn add_super_row_and_index(
     add_super_row(super_row_mm, bounds, super_row);
     let idx_pos = index_mm.len();
     index_mm.resize(idx_pos + size_of::<VIdPos>());
-    index_mm.write(
-        idx_pos,
-        &VIdPos {
-            vid: *super_row.get(0).unwrap().get(0).unwrap(),
-            pos: sr_pos,
-        },
-        1,
-    );
+    unsafe {
+        index_mm.copy_from_slice(
+            idx_pos,
+            &[VIdPos {
+                vid: *super_row.get(0).unwrap().get(0).unwrap(),
+                pos: sr_pos,
+            }],
+        );
+    }
 }
 
 pub fn add_super_row_and_index_compact(

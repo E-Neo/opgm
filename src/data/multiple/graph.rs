@@ -236,15 +236,15 @@ pub struct DataVertex<'a> {
 
 impl<'a> Vertex<LocalIndex<'a>> for DataVertex<'a> {
     fn id(&self) -> VId {
-        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).vid }
+        unsafe { self.mm.as_ref::<VertexHeader>(self.pos).vid }
     }
 
     fn in_deg(&self) -> usize {
-        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).in_deg as usize }
+        unsafe { self.mm.as_ref::<VertexHeader>(self.pos).in_deg as usize }
     }
 
     fn out_deg(&self) -> usize {
-        unsafe { (*self.mm.read::<VertexHeader>(self.pos)).out_deg as usize }
+        unsafe { self.mm.as_ref::<VertexHeader>(self.pos).out_deg as usize }
     }
 
     fn index(&self) -> LocalIndex<'a> {
@@ -253,7 +253,7 @@ impl<'a> Vertex<LocalIndex<'a>> for DataVertex<'a> {
             index: unsafe {
                 self.mm.as_slice(
                     self.pos + size_of::<VertexHeader>(),
-                    (*self.mm.read::<VertexHeader>(self.pos)).num_vlabels as usize,
+                    self.mm.as_ref::<VertexHeader>(self.pos).num_vlabels as usize,
                 )
             },
         }
@@ -286,7 +286,7 @@ impl<'a> Iterator for DataVertexIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.offset < self.len {
             let pos = self.pos;
-            self.pos += unsafe { (*self.mm.read::<VertexHeader>(pos)).num_bytes };
+            self.pos += unsafe { self.mm.as_ref::<VertexHeader>(pos).num_bytes };
             self.offset += 1;
             Some(DataVertex { mm: self.mm, pos })
         } else {
@@ -311,11 +311,11 @@ pub struct DataNeighbor<'a> {
 
 impl<'a> DataNeighbor<'a> {
     fn num_n_to_v(&self) -> usize {
-        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).num_n_to_v as usize }
+        unsafe { self.mm.as_ref::<NeighborHeader>(self.pos).num_n_to_v as usize }
     }
 
     fn num_v_to_n(&self) -> usize {
-        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).num_v_to_n as usize }
+        unsafe { self.mm.as_ref::<NeighborHeader>(self.pos).num_v_to_n as usize }
     }
 
     pub fn n_to_v_elabels(&self) -> &'a [ELabel] {
@@ -337,7 +337,7 @@ impl<'a> DataNeighbor<'a> {
 
 impl<'a> Neighbor for DataNeighbor<'a> {
     fn id(&self) -> VId {
-        unsafe { (*self.mm.read::<NeighborHeader>(self.pos)).nid }
+        unsafe { self.mm.as_ref::<NeighborHeader>(self.pos).nid }
     }
 
     fn topology_will_match(&self, info: &NeighborInfo) -> bool {

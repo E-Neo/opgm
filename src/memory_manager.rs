@@ -8,16 +8,11 @@ pub struct MmapFile {
 }
 
 impl MmapFile {
-    pub fn from_file(file: &File) -> Self {
-        let mmap = unsafe { Mmap::map(&file) }.unwrap();
-        Self { mmap }
-    }
-
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.mmap.len()
     }
 
-    pub fn read<T>(&self, pos: usize) -> *const T {
+    fn read<T>(&self, pos: usize) -> *const T {
         unsafe { self.mmap.as_ptr().add(pos) as *const T }
     }
 }
@@ -30,17 +25,7 @@ pub struct MmapMutFile {
 }
 
 impl MmapMutFile {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)
-            .unwrap();
-        Self::from_file(file)
-    }
-
-    pub fn from_file(file: File) -> Self {
+    fn from_file(file: File) -> Self {
         let len = file.metadata().unwrap().len();
         let mmap = if len == 0 {
             MmapMut::map_anon(1).unwrap()
@@ -50,11 +35,11 @@ impl MmapMutFile {
         Self { file, mmap, len }
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.len as usize
     }
 
-    pub fn resize(&mut self, new_len: usize) {
+    fn resize(&mut self, new_len: usize) {
         self.len = new_len as u64;
         self.mmap = MmapMut::map_anon(1).unwrap();
         self.file.set_len(self.len).unwrap();
@@ -63,20 +48,8 @@ impl MmapMutFile {
         }
     }
 
-    pub fn as_ptr(&self) -> *const u8 {
-        self.mmap.as_ptr()
-    }
-
-    pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.mmap.as_mut_ptr()
-    }
-
-    pub fn read<T>(&self, pos: usize) -> *const T {
+    fn read<T>(&self, pos: usize) -> *const T {
         unsafe { self.mmap.as_ptr().add(pos) as *const T }
-    }
-
-    pub fn write<T>(&mut self, pos: usize, data: *const T, count: usize) {
-        unsafe { std::ptr::copy(data, self.mmap.as_mut_ptr().add(pos) as *mut T, count) }
     }
 }
 
@@ -188,26 +161,6 @@ impl MemoryManager {
             MemoryManager::Sink => (),
         }
     }
-
-    pub fn read<T>(&self, pos: usize) -> *const T {
-        match self {
-            MemoryManager::Mem(vec) => unsafe { vec.as_ptr().add(pos) as *const T },
-            MemoryManager::Mmap(mmapfile) => mmapfile.read(pos),
-            MemoryManager::MmapMut(mmapfile) => mmapfile.read(pos),
-            MemoryManager::Sink => std::ptr::null(),
-        }
-    }
-
-    pub fn write<T>(&mut self, pos: usize, data: *const T, count: usize) {
-        match self {
-            MemoryManager::Mem(vec) => unsafe {
-                std::ptr::copy(data, vec.as_mut_ptr().add(pos) as *mut T, count)
-            },
-            MemoryManager::Mmap(_) => panic!("Cannot write read-only file"),
-            MemoryManager::MmapMut(mmapfile) => mmapfile.write(pos, data, count),
-            MemoryManager::Sink => (),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -229,21 +182,6 @@ mod tests {
         assert_eq!(
             unsafe { mm.as_slice::<u8>(0, mm.len()) },
             [1, 2, 3, 4, 5, 6]
-        );
-    }
-
-    #[test]
-    fn test_mem_write() {
-        let mut mm = MemoryManager::Mem(vec![1, 2, 3, 4, 5, 6]);
-        mm.write(0, &10u8 as *const u8, 1);
-        assert_eq!(
-            unsafe { mm.as_slice::<u8>(0, mm.len()) },
-            [10, 2, 3, 4, 5, 6]
-        );
-        mm.write(1, &20u8 as *const u8, 1);
-        assert_eq!(
-            unsafe { mm.as_slice::<u8>(0, mm.len()) },
-            [10, 20, 3, 4, 5, 6]
         );
     }
 
@@ -291,25 +229,6 @@ mod tests {
             unsafe { mm.as_slice::<u8>(0, mm.len()) },
             [1, 2, 3, 4, 5, 6]
         );
-    }
-
-    #[test]
-    fn test_mmap_write() {
-        let mut mm = new_mmap_mm();
-        mm.write(0, &10u8 as *const u8, 1);
-        assert_eq!(
-            unsafe { mm.as_slice::<u8>(0, mm.len()) },
-            [10, 2, 3, 4, 5, 6]
-        );
-        mm.write(1, &20u8 as *const u8, 1);
-        assert_eq!(
-            unsafe { mm.as_slice::<u8>(0, mm.len()) },
-            [10, 20, 3, 4, 5, 6]
-        );
-        let mut mm = new_empty_mmap_mm();
-        mm.resize(size_of::<usize>());
-        mm.write(0, &1995usize as *const usize, 1);
-        assert_eq!(unsafe { mm.as_slice::<usize>(0, 1) }, [1995]);
     }
 
     #[test]
@@ -379,15 +298,5 @@ mod tests {
         assert_eq!(unsafe { mm.as_slice::<i32>(1, 3) }, &[1, 2, 3]);
         mm.resize(3 * size_of::<i32>());
         assert_eq!(unsafe { mm.as_slice::<i32>(1, 3) }, &[1, 2, 3]);
-    }
-
-    #[test]
-    fn test_sink() {
-        let mut mm = MemoryManager::Sink;
-        assert_eq!(mm.len(), usize::MAX);
-        let data = [1, 2, 3, 4, 5, 6];
-        mm.write(99999, data.as_ptr(), data.len());
-        mm.resize(1000);
-        mm.resize(0);
     }
 }
