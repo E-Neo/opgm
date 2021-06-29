@@ -1,4 +1,4 @@
-use super::types::{NeighborHeader, VLabelPosLen, VertexHeader};
+use super::types::{IndexEntry, NeighborHeader, VertexHeader};
 use crate::{
     data::{
         Graph, GraphInfo, GraphView, Index, Neighbor, NeighborIter, NeighborView, Vertex,
@@ -134,7 +134,7 @@ impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
 
 pub struct GlobalIndex<'a> {
     mm: &'a MemoryManager,
-    index: &'a [VLabelPosLen],
+    index: &'a [IndexEntry],
 }
 
 impl<'a> IntoIterator for GlobalIndex<'a> {
@@ -156,17 +156,17 @@ impl<'a> Index<DataVertexIter<'a>> for GlobalIndex<'a> {
 
     fn get(&self, label: VLabel) -> DataVertexIter<'a> {
         self.index
-            .binary_search_by_key(&label, |&VLabelPosLen { vlabel, .. }| vlabel)
+            .binary_search_by_key(&label, |&IndexEntry { vlabel, .. }| vlabel)
             .map_or(DataVertexIter::new(self.mm, 0, 0), |offset| {
-                let &VLabelPosLen { pos, len, .. } = &self.index[offset];
-                DataVertexIter::new(self.mm, pos, len as usize)
+                let &IndexEntry { pos, len, .. } = &self.index[offset];
+                DataVertexIter::new(self.mm, pos as usize, len as usize)
             })
     }
 }
 
 pub struct GlobalIndexIntoIter<'a> {
     mm: &'a MemoryManager,
-    iter: std::slice::Iter<'a, VLabelPosLen>,
+    iter: std::slice::Iter<'a, IndexEntry>,
 }
 
 impl<'a> Iterator for GlobalIndexIntoIter<'a> {
@@ -174,15 +174,18 @@ impl<'a> Iterator for GlobalIndexIntoIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|x| {
-            let &VLabelPosLen { vlabel, pos, len } = x;
-            (vlabel, DataVertexIter::new(self.mm, pos, len as usize))
+            let &IndexEntry { vlabel, pos, len } = x;
+            (
+                vlabel,
+                DataVertexIter::new(self.mm, pos as usize, len as usize),
+            )
         })
     }
 }
 
 pub struct LocalIndex<'a> {
     mm: &'a MemoryManager,
-    index: &'a [VLabelPosLen],
+    index: &'a [IndexEntry],
 }
 
 impl<'a> IntoIterator for LocalIndex<'a> {
@@ -204,17 +207,17 @@ impl<'a> Index<DataNeighborIter<'a>> for LocalIndex<'a> {
 
     fn get(&self, label: VLabel) -> DataNeighborIter<'a> {
         self.index
-            .binary_search_by_key(&label, |&VLabelPosLen { vlabel, .. }| vlabel)
+            .binary_search_by_key(&label, |&IndexEntry { vlabel, .. }| vlabel)
             .map_or(DataNeighborIter::new(self.mm, 0, 0), |offset| {
-                let &VLabelPosLen { pos, len, .. } = &self.index[offset];
-                DataNeighborIter::new(self.mm, pos, len as usize)
+                let &IndexEntry { pos, len, .. } = &self.index[offset];
+                DataNeighborIter::new(self.mm, pos as usize, len as usize)
             })
     }
 }
 
 pub struct LocalIndexIntoIter<'a> {
     mm: &'a MemoryManager,
-    iter: std::slice::Iter<'a, VLabelPosLen>,
+    iter: std::slice::Iter<'a, IndexEntry>,
 }
 
 impl<'a> Iterator for LocalIndexIntoIter<'a> {
@@ -222,8 +225,11 @@ impl<'a> Iterator for LocalIndexIntoIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|x| {
-            let &VLabelPosLen { vlabel, pos, len } = x;
-            (vlabel, DataNeighborIter::new(self.mm, pos, len as usize))
+            let &IndexEntry { vlabel, pos, len } = x;
+            (
+                vlabel,
+                DataNeighborIter::new(self.mm, pos as usize, len as usize),
+            )
         })
     }
 }
@@ -286,7 +292,7 @@ impl<'a> Iterator for DataVertexIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.offset < self.len {
             let pos = self.pos;
-            self.pos += unsafe { self.mm.as_ref::<VertexHeader>(pos).num_bytes };
+            self.pos += unsafe { self.mm.as_ref::<VertexHeader>(pos).num_bytes } as usize;
             self.offset += 1;
             Some(DataVertex { mm: self.mm, pos })
         } else {

@@ -1,4 +1,4 @@
-use super::types::{NeighborHeader, VLabelPosLen, VertexHeader};
+use super::types::{IndexEntry, NeighborHeader, VertexHeader};
 use crate::{
     constants::MAGIC_MULTIPLE,
     memory_manager::MemoryManager,
@@ -37,14 +37,14 @@ where
         mm.copy_from_slice::<u64>(0, &[MAGIC_MULTIPLE]);
         mm.copy_from_slice::<u64>(size_of::<u64>(), &[num_vlabels as u64]);
     }
-    let mut pos = 2 * size_of::<u64>() + num_vlabels * size_of::<VLabelPosLen>();
+    let mut pos = 2 * size_of::<u64>() + num_vlabels * size_of::<IndexEntry>();
     for (i, (vlabel, vlabel_group)) in GroupBy::new(info_edges, |e| e.0).enumerate() {
         let (new_pos, len) = write_vertices(mm, pos, vlabel_group);
         write_index_entry(
             mm,
-            2 * size_of::<u64>() + i * size_of::<VLabelPosLen>(),
+            2 * size_of::<u64>() + i * size_of::<IndexEntry>(),
             vlabel,
-            pos,
+            pos as u64,
             len,
         );
         pos = new_pos;
@@ -88,7 +88,7 @@ pub fn mm_from_sqlite(mm: &mut MemoryManager, conn: &rusqlite::Connection) -> ru
 }
 
 fn estimate_datagraph_size(num_vlabels: usize, num_vertices: usize, num_edges: usize) -> usize {
-    let vlabel_pos_len_size = size_of::<VLabelPosLen>() * num_vlabels;
+    let vlabel_pos_len_size = size_of::<IndexEntry>() * num_vlabels;
     let header_size = 2 * size_of::<u64>() + vlabel_pos_len_size;
     let vertex_header_size = size_of::<VertexHeader>() * num_vertices;
     let vertex_vlabel_pos_len_size = vlabel_pos_len_size * num_vertices;
@@ -113,15 +113,15 @@ fn write_vertices(mm: &mut MemoryManager, mut pos: usize, edges: &[InfoEdge]) ->
 fn write_vertex(mm: &mut MemoryManager, pos: usize, vid: VId, edges: &[InfoEdge]) -> usize {
     let (mut in_deg, mut out_deg) = (0, 0);
     let num_nlabels = GroupBy::new(edges, |e| e.2).count();
-    let mut new_pos = pos + size_of::<VertexHeader>() + num_nlabels * size_of::<VLabelPosLen>();
+    let mut new_pos = pos + size_of::<VertexHeader>() + num_nlabels * size_of::<IndexEntry>();
     for (i, (nlabel, nlabel_group)) in GroupBy::new(edges, |e| e.2).enumerate() {
         let (new_neighbors_pos, neighbors_len, neighbors_in_deg, neighbors_out_deg) =
             write_neighbors(mm, new_pos, nlabel_group);
         write_index_entry(
             mm,
-            pos + size_of::<VertexHeader>() + i * size_of::<VLabelPosLen>(),
+            pos + size_of::<VertexHeader>() + i * size_of::<IndexEntry>(),
             nlabel,
-            new_pos,
+            new_pos as u64,
             neighbors_len,
         );
         new_pos = new_neighbors_pos;
@@ -131,7 +131,7 @@ fn write_vertex(mm: &mut MemoryManager, pos: usize, vid: VId, edges: &[InfoEdge]
     write_vertex_header(
         mm,
         pos,
-        new_pos - pos,
+        (new_pos - pos) as u64,
         vid,
         in_deg,
         out_deg,
@@ -159,16 +159,16 @@ fn write_neighbors(
     (pos, neighbors_len, in_deg, out_deg)
 }
 
-fn write_index_entry(mm: &mut MemoryManager, mm_pos: usize, vlabel: VLabel, pos: usize, len: u32) {
+fn write_index_entry(mm: &mut MemoryManager, mm_pos: usize, vlabel: VLabel, pos: u64, len: u32) {
     unsafe {
-        mm.copy_from_slice(mm_pos, &[VLabelPosLen { vlabel, pos, len }]);
+        mm.copy_from_slice(mm_pos, &[IndexEntry { vlabel, pos, len }]);
     }
 }
 
 fn write_vertex_header(
     mm: &mut MemoryManager,
     pos: usize,
-    num_bytes: usize,
+    num_bytes: u64,
     vid: VId,
     in_deg: u32,
     out_deg: u32,

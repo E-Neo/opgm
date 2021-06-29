@@ -1,13 +1,13 @@
 use crate::types::{VId, VLabel};
 
-pub struct VLabelPosLen {
+pub struct IndexEntry {
     pub vlabel: VLabel,
-    pub pos: usize,
+    pub pos: u64,
     pub len: u32,
 }
 
 pub struct VertexHeader {
-    pub num_bytes: usize,
+    pub num_bytes: u64,
     pub vid: VId,
     pub in_deg: u32,
     pub out_deg: u32,
