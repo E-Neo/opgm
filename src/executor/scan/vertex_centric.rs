@@ -1,10 +1,11 @@
+use crate::executor::types::{PosLen, SuperRowHeader, VIdPos};
 use crate::{
     data::{Graph, Index, Neighbor, NeighborIter, Vertex, VertexIter},
     executor::{write_index, write_num_bytes, write_pos_len, write_super_row_header, write_vid},
     memory_manager::MemoryManager,
     pattern::NeighborInfo,
     planner::CharacteristicInfo,
-    types::{PosLen, SuperRowHeader, VId, VIdPos, VLabel},
+    types::{VId, VLabel},
 };
 use std::cmp::Ordering;
 use std::mem::size_of;

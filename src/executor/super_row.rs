@@ -1,8 +1,5 @@
-use crate::{
-    executor::count_rows_slow_helper,
-    memory_manager::MemoryManager,
-    types::{PosLen, SuperRowHeader, VId, VIdPos},
-};
+use super::types::{PosLen, SuperRowHeader, VIdPos};
+use crate::{executor::count_rows_slow_helper, memory_manager::MemoryManager, types::VId};
 use rayon::prelude::*;
 use std::mem::size_of;
 

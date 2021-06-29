@@ -1,8 +1,9 @@
+use super::types::VIdPos;
 use crate::{
     executor::{count_rows_slow_helper, read_super_row_header, SuperRow, SuperRows},
     memory_manager::MemoryManager,
     planner::{IndexType, IndexedJoinPlan, IntersectionPlan, JoinPlan},
-    types::{VId, VIdPos},
+    types::VId,
 };
 use std::{collections::HashMap, mem::size_of};
 

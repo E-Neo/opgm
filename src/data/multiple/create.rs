@@ -1,5 +1,6 @@
 use super::types::{NeighborHeader, VLabelPosLen, VertexHeader};
 use crate::{
+    constants::MAGIC_MULTIPLE,
     memory_manager::MemoryManager,
     tools::{ExactSizeIter, GroupBy},
     types::{ELabel, VId, VLabel},
@@ -33,7 +34,7 @@ where
         num_edges,
     ));
     unsafe {
-        mm.copy_from_slice::<u64>(0, &[0x1949]);
+        mm.copy_from_slice::<u64>(0, &[MAGIC_MULTIPLE]);
         mm.copy_from_slice::<u64>(size_of::<u64>(), &[num_vlabels as u64]);
     }
     let mut pos = 2 * size_of::<u64>() + num_vlabels * size_of::<VLabelPosLen>();

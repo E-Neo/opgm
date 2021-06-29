@@ -1,8 +1,5 @@
-use crate::{
-    executor::SuperRows,
-    memory_manager::MemoryManager,
-    types::{VId, VIdPos},
-};
+use super::types::VIdPos;
+use crate::{executor::SuperRows, memory_manager::MemoryManager, types::VId};
 use std::mem::size_of;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]

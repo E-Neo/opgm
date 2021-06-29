@@ -1,5 +1,6 @@
 //! Out-of-core property graph matching.
 
+pub mod constants;
 pub mod data;
 pub mod executor;
 pub mod front_end;

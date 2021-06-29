@@ -1,5 +1,6 @@
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
 use opgm::{
+    constants::MAGIC_MULTIPLE,
     data::{multiple, Graph},
     memory_manager::MemoryManager,
     task::Task,
@@ -20,8 +21,8 @@ fn handle_createdb(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error
 
 fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
     let data_mm = MemoryManager::new_mmap(matches.value_of("DATAGRAPH").unwrap())?;
-    let info = match unsafe { data_mm.as_ref::<u64>(0) } {
-        0x1949 => multiple::DataGraph::new(&data_mm).info(),
+    let info = match unsafe { *data_mm.as_ref::<u64>(0) } {
+        MAGIC_MULTIPLE => multiple::DataGraph::new(&data_mm).info(),
         _ => unreachable!(),
     };
     println!("{}", info);
@@ -30,8 +31,8 @@ fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
 
 fn handle_run(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let data_mm = MemoryManager::new_mmap(matches.value_of("DATAGRAPH").unwrap())?;
-    let data = match unsafe { data_mm.as_ref::<u64>(0) } {
-        0x1949 => multiple::DataGraph::new(&data_mm),
+    let data = match unsafe { *data_mm.as_ref::<u64>(0) } {
+        MAGIC_MULTIPLE => multiple::DataGraph::new(&data_mm),
         _ => panic!("unrecognized data graph format"),
     };
     Task::new(
