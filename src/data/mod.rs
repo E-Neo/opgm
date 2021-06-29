@@ -9,6 +9,7 @@ use crate::{
 };
 
 pub mod multiple;
+pub mod single;
 
 mod info;
 mod view;

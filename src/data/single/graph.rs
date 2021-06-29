@@ -1,4 +1,4 @@
-use super::types::{IndexEntry, NeighborHeader, VertexHeader};
+use super::types::{IndexEntry, NeighborEntry, VertexHeader};
 use crate::{
     data::{
         Graph, GraphInfo, GraphView, Index, Neighbor, NeighborIter, NeighborView, Vertex,
@@ -46,17 +46,12 @@ use std::{collections::HashSet, mem::size_of};
 /// +-----------------------------------------+                              |- VertexNode
 /// |                    n                    |                              |
 /// +--------------------+--------------------+                              |
-/// |    num_n_to_v      |    num_v_to n      |                              |
+/// |    n_to_v_elabel   |    v_to n_elabel   |                              |
 /// +--------------------+--------------------+                              |
-/// +-----------------------------------------+                              |
-/// |                 elabel                  |<-+                           |
-/// +-----------------------------------------+  |                           |
-/// |                 elabel                  |  |  num_n_to_v + num_v_to_n  |
-/// +-----------------------------------------+  |-           rows           |
-///                     ...                      |                           |
-/// +-----------------------------------------+  |                           |
-/// |                 elabel                  |<-+                           |
-/// +-----------------------------------------+                              |
+/// |                    n                    |                              |
+/// +--------------------+--------------------+                              |
+/// |    n_to_v_elabel   |    v_to n_elabel   |                              |
+/// +--------------------+--------------------+                              |
 ///                     ...                    <-----------------------------+
 /// ```
 pub struct DataGraph<'a> {
@@ -90,13 +85,14 @@ impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
             for vertex in vertices {
                 for (_, neighbors) in vertex.index() {
                     for neighbor in neighbors {
-                        num_edges += neighbor.num_v_to_n() + neighbor.num_n_to_v();
-                        neighbor.n_to_v_elabels().iter().for_each(|&elabel| {
-                            elabels.insert(elabel);
-                        });
-                        neighbor.v_to_n_elabels().iter().for_each(|&elabel| {
-                            elabels.insert(elabel);
-                        });
+                        if neighbor.n_to_v_elabel() >= 0 {
+                            num_edges += 1;
+                            elabels.insert(neighbor.n_to_v_elabel());
+                        }
+                        if neighbor.v_to_n_elabel() >= 0 {
+                            num_edges += 1;
+                            elabels.insert(neighbor.v_to_n_elabel());
+                        }
                     }
                 }
             }
@@ -119,8 +115,16 @@ impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
                                 neighbors.map(|neighbor| {
                                     NeighborView::new(
                                         neighbor.id(),
-                                        neighbor.n_to_v_elabels().iter().map(|&e| e),
-                                        neighbor.v_to_n_elabels().iter().map(|&e| e),
+                                        if neighbor.n_to_v_elabel() >= 0 {
+                                            vec![neighbor.n_to_v_elabel()]
+                                        } else {
+                                            vec![]
+                                        },
+                                        if neighbor.v_to_n_elabel() >= 0 {
+                                            vec![neighbor.v_to_n_elabel()]
+                                        } else {
+                                            vec![]
+                                        },
                                     )
                                 }),
                             )
@@ -316,71 +320,29 @@ pub struct DataNeighbor<'a> {
 }
 
 impl<'a> DataNeighbor<'a> {
-    fn num_n_to_v(&self) -> usize {
-        unsafe { self.mm.as_ref::<NeighborHeader>(self.pos).num_n_to_v as usize }
+    fn n_to_v_elabel(&self) -> ELabel {
+        unsafe { self.mm.as_ref::<NeighborEntry>(self.pos).n_to_v_elabel }
     }
 
-    fn num_v_to_n(&self) -> usize {
-        unsafe { self.mm.as_ref::<NeighborHeader>(self.pos).num_v_to_n as usize }
-    }
-
-    pub fn n_to_v_elabels(&self) -> &'a [ELabel] {
-        unsafe {
-            self.mm
-                .as_slice(self.pos + size_of::<NeighborHeader>(), self.num_n_to_v())
-        }
-    }
-
-    pub fn v_to_n_elabels(&self) -> &'a [ELabel] {
-        unsafe {
-            self.mm.as_slice(
-                self.pos + size_of::<NeighborHeader>() + size_of::<ELabel>() * self.num_n_to_v(),
-                self.num_v_to_n(),
-            )
-        }
+    fn v_to_n_elabel(&self) -> ELabel {
+        unsafe { self.mm.as_ref::<NeighborEntry>(self.pos).v_to_n_elabel }
     }
 }
 
 impl<'a> Neighbor for DataNeighbor<'a> {
     fn id(&self) -> VId {
-        unsafe { self.mm.as_ref::<NeighborHeader>(self.pos).nid }
+        unsafe { self.mm.as_ref::<NeighborEntry>(self.pos).nid }
     }
 
     fn topology_will_match(&self, info: &NeighborInfo) -> bool {
-        check_degree(self, info) && check_edges(self, info)
-    }
-}
-
-fn check_degree(neighbor: &DataNeighbor, info: &NeighborInfo) -> bool {
-    neighbor.n_to_v_elabels().len() >= info.n_to_v_elabels().len()
-        && neighbor.v_to_n_elabels().len() >= info.v_to_n_elabels().len()
-        && neighbor.n_to_v_elabels().len() + neighbor.v_to_n_elabels().len()
-            >= info.n_to_v_elabels().len()
+        info.n_to_v_elabels().contains(&self.n_to_v_elabel()) as usize
+            + info.v_to_n_elabels().contains(&self.v_to_n_elabel()) as usize
+            + info.undirected_elabels().contains(&self.n_to_v_elabel()) as usize
+            + info.undirected_elabels().contains(&self.v_to_n_elabel()) as usize
+            == info.n_to_v_elabels().len()
                 + info.v_to_n_elabels().len()
                 + info.undirected_elabels().len()
-}
-
-fn check_edges(neighbor: &DataNeighbor, info: &NeighborInfo) -> bool {
-    let mut n_to_v_elabels: HashSet<_> =
-        info.n_to_v_elabels().iter().map(|&elabel| elabel).collect();
-    let mut v_to_n_elabels: HashSet<_> =
-        info.v_to_n_elabels().iter().map(|&elabel| elabel).collect();
-    let mut undirected_elabels: HashSet<_> = info
-        .undirected_elabels()
-        .iter()
-        .map(|&elabel| elabel)
-        .collect();
-    for elabel in neighbor.n_to_v_elabels() {
-        if !n_to_v_elabels.remove(elabel) {
-            undirected_elabels.remove(elabel);
-        }
     }
-    for elabel in neighbor.v_to_n_elabels() {
-        if !v_to_n_elabels.remove(elabel) {
-            undirected_elabels.remove(elabel);
-        }
-    }
-    n_to_v_elabels.len() == 0 && v_to_n_elabels.len() == 0 && undirected_elabels.len() == 0
 }
 
 /// An iterator visiting the neighbors of a data vertex.
@@ -412,8 +374,7 @@ impl<'a> Iterator for DataNeighborIter<'a> {
                 mm: self.mm,
                 pos: self.pos,
             };
-            self.pos += size_of::<NeighborHeader>()
-                + size_of::<ELabel>() * (data_neighbor.num_n_to_v() + data_neighbor.num_v_to_n());
+            self.pos += size_of::<NeighborEntry>();
             self.offset += 1;
             Some(data_neighbor)
         } else {
@@ -432,8 +393,7 @@ impl<'a> NeighborIter<DataNeighbor<'a>> for DataNeighborIter<'a> {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::data::multiple::create::mm_from_iter;
+    use super::{super::create::mm_from_iter, *};
 
     fn create_triangle_mm() -> MemoryManager {
         let mut mm = MemoryManager::Mem(vec![]);
@@ -448,15 +408,7 @@ mod tests {
     fn create_star_mm() -> MemoryManager {
         let mut mm = MemoryManager::Mem(vec![]);
         let vertices = vec![(1, 1), (3, 2), (4, 2), (5, 3), (6, 3)];
-        let edges = vec![
-            (1, 3, 2),
-            (1, 3, 1),
-            (1, 3, 3),
-            (3, 1, 1),
-            (1, 4, 1),
-            (1, 5, 2),
-            (1, 6, 2),
-        ];
+        let edges = vec![(1, 3, 2), (3, 1, 1), (1, 4, 1), (1, 5, 2), (1, 6, 2)];
         mm_from_iter(&mut mm, vertices.into_iter(), edges.into_iter());
         mm
     }
@@ -513,8 +465,8 @@ mod tests {
             .1
             .next()
             .unwrap();
-        assert_eq!(n3.n_to_v_elabels(), [1]);
-        assert_eq!(n3.v_to_n_elabels(), [1, 2, 3]);
+        assert_eq!(n3.n_to_v_elabel(), 1);
+        assert_eq!(n3.v_to_n_elabel(), 2);
     }
 
     #[test]

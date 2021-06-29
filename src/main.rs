@@ -1,20 +1,26 @@
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
 use opgm::{
-    constants::MAGIC_MULTIPLE,
-    data::{multiple, Graph},
+    constants::{MAGIC_MULTIPLE, MAGIC_SINGLE},
+    data::{multiple, single, Graph},
     memory_manager::MemoryManager,
     task::Task,
     types::VId,
 };
 
 fn handle_createdb(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let path = matches.value_of("PATH").unwrap();
+    let sqlite = matches.value_of("SQLITE").unwrap();
     match matches.value_of("FMT").unwrap() {
         "multiple" => {
             multiple::create::mm_from_sqlite(
-                &mut MemoryManager::new_mmap_mut(matches.value_of("PATH").unwrap(), 0)?,
-                &rusqlite::Connection::open(matches.value_of("SQLITE").unwrap())?,
+                &mut MemoryManager::new_mmap_mut(path, 0)?,
+                &rusqlite::Connection::open(sqlite)?,
             )?;
         }
+        "single" => single::create::mm_from_sqlite(
+            &mut MemoryManager::new_mmap_mut(path, 0)?,
+            &rusqlite::Connection::open(sqlite)?,
+        )?,
         _ => unreachable!(),
     }
     Ok(())
@@ -24,6 +30,7 @@ fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
     let data_mm = MemoryManager::new_mmap(matches.value_of("DATAGRAPH").unwrap())?;
     let info = match unsafe { *data_mm.as_ref::<u64>(0) } {
         MAGIC_MULTIPLE => multiple::DataGraph::new(&data_mm).info(),
+        MAGIC_SINGLE => single::DataGraph::new(&&data_mm).info(),
         _ => unreachable!(),
     };
     println!("{}", info);
@@ -32,29 +39,50 @@ fn handle_dbinfo(matches: &ArgMatches) -> std::io::Result<()> {
 
 fn handle_run(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let data_mm = MemoryManager::new_mmap(matches.value_of("DATAGRAPH").unwrap())?;
-    let data = match unsafe { *data_mm.as_ref::<u64>(0) } {
-        MAGIC_MULTIPLE => multiple::DataGraph::new(&data_mm),
-        _ => panic!("unrecognized data graph format"),
+    let query = if let Some(query_path) = matches.value_of("QUERY_PATH") {
+        std::fs::read_to_string(query_path)?
+    } else {
+        String::from(matches.value_of("QUERY").unwrap())
     };
-    Task::new(
-        data,
-        if let Some(query_path) = matches.value_of("QUERY_PATH") {
-            std::fs::read_to_string(query_path)?
-        } else {
-            String::from(matches.value_of("QUERY").unwrap())
-        },
-        matches.value_of("DIRECTORY").unwrap(),
-        matches.value_of("NAME").unwrap(),
-        matches.value_of("SR-MM-TYPE").unwrap(),
-        matches.value_of("INDEX-MM-TYPE").unwrap(),
-        matches.value_of("INDEX-TYPE").unwrap(),
-        matches
-            .values_of("ROOTS")
-            .map(|roots| roots.map(|root| root.parse::<VId>().unwrap()).collect()),
-        matches.value_of("SCAN-METHOD").unwrap(),
-        matches.value_of("JOIN-METHOD").unwrap(),
-    )
-    .run()
+    let directory = matches.value_of("DIRECTORY").unwrap();
+    let name = matches.value_of("NAME").unwrap();
+    let sr_mm_type = matches.value_of("SR-MM-TYPE").unwrap();
+    let index_mm_type = matches.value_of("INDEX-MM-TYPE").unwrap();
+    let index_type = matches.value_of("INDEX-TYPE").unwrap();
+    let roots = matches
+        .values_of("ROOTS")
+        .map(|roots| roots.map(|root| root.parse::<VId>().unwrap()).collect());
+    let scan_method = matches.value_of("SCAN-METHOD").unwrap();
+    let join_method = matches.value_of("JOIN-METHOD").unwrap();
+    match unsafe { *data_mm.as_ref::<u64>(0) } {
+        MAGIC_MULTIPLE => Task::new(
+            multiple::DataGraph::new(&data_mm),
+            query,
+            directory,
+            name,
+            sr_mm_type,
+            index_mm_type,
+            index_type,
+            roots,
+            scan_method,
+            join_method,
+        )
+        .run(),
+        MAGIC_SINGLE => Task::new(
+            single::DataGraph::new(&data_mm),
+            query,
+            directory,
+            name,
+            sr_mm_type,
+            index_mm_type,
+            index_type,
+            roots,
+            scan_method,
+            join_method,
+        )
+        .run(),
+        _ => panic!("unrecognized data graph format"),
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -72,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   CREATE TABLE vertices (vid INT, vlabel INT);
   CREATE TABLE edges (src INT, dst INT, elabel INT);
 ")
-            (@arg FMT: * possible_value[multiple])
+            (@arg FMT: * possible_value[multiple single])
             (@arg SQLITE: *)
             (@arg PATH: *)
         )
