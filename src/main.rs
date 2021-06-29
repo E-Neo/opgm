@@ -4,6 +4,7 @@ use opgm::{
     data::{multiple, Graph},
     memory_manager::MemoryManager,
     task::Task,
+    types::VId,
 };
 
 fn handle_createdb(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
@@ -47,7 +48,9 @@ fn handle_run(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
         matches.value_of("SR-MM-TYPE").unwrap(),
         matches.value_of("INDEX-MM-TYPE").unwrap(),
         matches.value_of("INDEX-TYPE").unwrap(),
-        None,
+        matches
+            .values_of("ROOTS")
+            .map(|roots| roots.map(|root| root.parse::<VId>().unwrap()).collect()),
         matches.value_of("SCAN-METHOD").unwrap(),
         matches.value_of("JOIN-METHOD").unwrap(),
     )
@@ -92,6 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                   possible_value[mem mmap sink])
             (@arg ("INDEX-TYPE"): --("index-type") +takes_value default_value[hash]
                   possible_value[sorted hash])
+            (@arg ROOTS: --roots +takes_value ...
+                  { |n| {
+                      n.parse::<VId>()
+                          .map_or_else(|_| Err(String::from("invalid root")), |_| Ok(()))} }
+            )
             (@arg ("SCAN-METHOD"): --("scan-method") +takes_value default_value("vertex-centric")
                   possible_value("vertex-centric"))
             (@arg ("JOIN-METHOD"): --("join-method") +takes_value default_value("count-rows")
