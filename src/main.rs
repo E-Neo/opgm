@@ -124,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                   possible_value[mem mmap sink])
             (@arg ("INDEX-TYPE"): --("index-type") +takes_value default_value[hash]
                   possible_value[sorted hash])
-            (@arg ROOTS: --roots +takes_value ...
+            (@arg ROOTS: --roots +takes_value +require_delimiter ...
                   { |n| {
                       n.parse::<VId>()
                           .map_or_else(|_| Err(String::from("invalid root")), |_| Ok(()))} }
