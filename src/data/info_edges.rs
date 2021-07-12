@@ -1,9 +1,9 @@
 use crate::{
     memory_manager::MemoryManager,
-    tools::ExactSizeIter,
+    tools::{parallel_external_sort, ExactSizeIter},
     types::{ELabel, VId, VLabel},
 };
-use rayon::slice::ParallelSliceMut;
+use log::info;
 use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
@@ -21,9 +21,11 @@ where
 {
     let (num_vertices, num_edges) = (vertices.len(), edges.len());
     mm.resize(size_of::<InfoEdgeHeader>() + 2 * num_edges * size_of::<InfoEdge>());
+    info!("scanning vertices...");
     let (vid_vlabel_map, num_vlabels) = create_vid_vlabel_map(vertices);
     let mut elabels: HashSet<ELabel> = HashSet::new();
     let mut pos = size_of::<InfoEdgeHeader>();
+    info!("scanning edges...");
     for (src, dst, elabel) in edges {
         elabels.insert(elabel);
         unsafe {
@@ -65,7 +67,8 @@ where
     mm.resize(pos);
     let data: &mut [InfoEdge] =
         unsafe { mm.as_mut_slice(size_of::<InfoEdgeHeader>(), num_edges * 2) };
-    data.par_sort_unstable();
+    info!("sorting...");
+    parallel_external_sort(data).unwrap();
 }
 
 /// Reads the data graph stored in the SQLite3 file into `mm`.

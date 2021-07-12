@@ -86,6 +86,7 @@ fn handle_sort(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     let temp_dir = std::env::temp_dir();
     #[rustfmt::skip]
     let matches = clap_app!((crate_name!()) =>
