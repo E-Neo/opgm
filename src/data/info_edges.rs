@@ -65,6 +65,7 @@ where
         num_scanned += 2;
         pos += 2 * size_of::<InfoEdge>();
         if num_scanned % chunk_size == 0 {
+            info!("sorting...");
             unsafe { mm.as_mut_slice::<InfoEdge>(chunk_pos, chunk_size) }.par_sort_unstable();
             chunk_pos = pos;
         }
@@ -91,7 +92,10 @@ where
         unsafe { mm.as_mut_slice(size_of::<InfoEdgeHeader>(), num_edges * 2) };
     let len = data.len();
     if chunk_size < len {
-        info!("merging...");
+        info!(
+            "chunk_size = {}G merging...",
+            chunk_size * size_of::<InfoEdge>() / 1024 / 1024 / 1024
+        );
         let file = tempfile::tempfile().unwrap();
         file.set_len((len * size_of::<InfoEdge>()) as u64).unwrap();
         let mut buf = unsafe { MmapMut::map_mut(&file).unwrap() };
