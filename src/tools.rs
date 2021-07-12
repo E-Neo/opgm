@@ -1,7 +1,4 @@
-use log::info;
-use memmap::MmapMut;
-use rayon::slice::ParallelSliceMut;
-use std::{mem::size_of, ops::Shl};
+use std::mem::size_of;
 
 pub struct GroupBy<'a, T, F, K>
 where
@@ -79,45 +76,12 @@ impl<I: Iterator> ExactSizeIterator for ExactSizeIter<I> {
     }
 }
 
-pub fn parallel_external_sort<T: Send + Ord>(data: &mut [T]) -> std::io::Result<()> {
-    let mut chunk_size =
-        512 * (sys_info::mem_info().unwrap().avail & u64::MAX.shl(20)) as usize / size_of::<T>();
-    info!(
-        "chunk_size = {}G",
-        chunk_size * size_of::<T>() / 1024 / 1024 / 1024
-    );
-    for chunk in data.chunks_mut(chunk_size) {
-        chunk.par_sort_unstable();
-    }
-    let len = data.len();
-    if chunk_size < len {
-        info!("merging...");
-        let file = tempfile::tempfile()?;
-        file.set_len((len * size_of::<T>()) as u64)?;
-        let mut buf = unsafe { MmapMut::map_mut(&file)? };
-        while chunk_size < len {
-            let mut chunk_begin = 0;
-            while chunk_begin < len {
-                merge(
-                    &mut data[chunk_begin..std::cmp::min(chunk_begin + 2 * chunk_size, len)],
-                    std::cmp::min(chunk_size, len - chunk_begin),
-                    buf.as_mut_ptr() as *mut T,
-                    &mut (|a, b| a < b),
-                );
-                chunk_begin += 2 * chunk_size;
-            }
-            chunk_size *= 2;
-        }
-    }
-    Ok(())
-}
-
 /// Merges non-decreasing runs `v[..mid]` and `v[mid..]` using `buf` as temporary storage, and
 /// stores the result into `v[..]`.
 ///
 /// https://github.com/rust-lang/rust/blob/481971978fda83aa7cf1f1f3c80cfad822377cf2
 /// /library/alloc/src/slice.rs#L928-L1042
-fn merge<T, F>(v: &mut [T], mid: usize, buf: *mut T, is_less: &mut F)
+pub fn merge<T, F>(v: &mut [T], mid: usize, buf: *mut T, is_less: &mut F)
 where
     F: FnMut(&T, &T) -> bool,
 {
