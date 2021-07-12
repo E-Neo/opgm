@@ -318,19 +318,22 @@ fn finish_results(
 mod tests {
     use super::*;
     use crate::{
-        data::multiple::{create::mm_from_iter, DataGraph},
+        data::{
+            info_edges::mm_from_iter,
+            multiple::{create::mm_from_info_edges, DataGraph},
+        },
         executor::{add_super_row_and_index, empty_super_row_mm, SuperRowIndexView, SuperRowsView},
         pattern::{Characteristic, PatternGraph},
     };
 
     fn create_super_row_mm(num_eqvs: usize, num_cover: usize) -> MemoryManager {
-        let mut mm = MemoryManager::Mem(vec![]);
+        let mut mm = MemoryManager::new_mem(0);
         empty_super_row_mm(&mut mm, num_eqvs, num_cover);
         mm
     }
 
     fn create_stars_mm() -> MemoryManager {
-        let mut mm = MemoryManager::Mem(vec![]);
+        let mut info_edges_mm = MemoryManager::new_mem(0);
         let vertices = vec![
             (1, 0),
             (2, 1),
@@ -349,7 +352,9 @@ mod tests {
             (5, 7, 0),
             (5, 8, 0),
         ];
-        mm_from_iter(&mut mm, vertices.into_iter(), edges.into_iter());
+        mm_from_iter(&mut info_edges_mm, vertices.into_iter(), edges.into_iter());
+        let mut mm = MemoryManager::new_mem(0);
+        mm_from_info_edges(&mut mm, &info_edges_mm);
         mm
     }
 
@@ -435,8 +440,10 @@ mod tests {
     fn create_data_graph_q02_mm() -> MemoryManager {
         let vertices = vec![(1, 1), (2, 2), (3, 3), (4, 4), (11, 1), (14, 4)];
         let arcs = vec![(1, 2, 0), (2, 3, 0), (3, 4, 0), (3, 14, 0), (11, 2, 0)];
-        let mut mm = MemoryManager::Mem(vec![]);
-        mm_from_iter(&mut mm, vertices.into_iter(), arcs.into_iter());
+        let mut info_edges_mm = MemoryManager::new_mem(0);
+        mm_from_iter(&mut info_edges_mm, vertices.into_iter(), arcs.into_iter());
+        let mut mm = MemoryManager::new_mem(0);
+        mm_from_info_edges(&mut mm, &info_edges_mm);
         mm
     }
 

@@ -116,13 +116,15 @@ pub fn decompose_stars<'a, G: Graph<GIdx>, GIdx>(d: &G, p: &PatternGraph) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::multiple::create::mm_from_iter;
     use crate::data::multiple::DataGraph;
+    use crate::data::{info_edges::mm_from_iter, multiple::create::mm_from_info_edges};
     use crate::memory_manager::MemoryManager;
 
     fn create_empty_data_graph_mm() -> MemoryManager {
-        let mut mm = MemoryManager::Mem(vec![]);
-        mm_from_iter(&mut mm, std::iter::empty(), std::iter::empty());
+        let mut info_edges_mm = MemoryManager::new_mem(0);
+        mm_from_iter(&mut info_edges_mm, std::iter::empty(), std::iter::empty());
+        let mut mm = MemoryManager::new_mem(0);
+        mm_from_info_edges(&mut mm, &info_edges_mm);
         mm
     }
 

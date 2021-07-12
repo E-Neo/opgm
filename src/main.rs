@@ -1,26 +1,18 @@
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
 use opgm::{
     constants::{MAGIC_MULTIPLE, MAGIC_SINGLE},
-    data::{multiple, single, Graph},
+    data::{info_edges, multiple, single, Graph},
     memory_manager::MemoryManager,
     task::Task,
     types::VId,
 };
 
 fn handle_createdb(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let path = matches.value_of("PATH").unwrap();
-    let sqlite = matches.value_of("SQLITE").unwrap();
+    let mut mm = MemoryManager::new_mmap_mut(matches.value_of("PATH").unwrap(), 0)?;
+    let info_edges_mm = MemoryManager::new_mmap(matches.value_of("DATA").unwrap())?;
     match matches.value_of("FMT").unwrap() {
-        "multiple" => {
-            multiple::create::mm_from_sqlite(
-                &mut MemoryManager::new_mmap_mut(path, 0)?,
-                &rusqlite::Connection::open(sqlite)?,
-            )?;
-        }
-        "single" => single::create::mm_from_sqlite(
-            &mut MemoryManager::new_mmap_mut(path, 0)?,
-            &rusqlite::Connection::open(sqlite)?,
-        )?,
+        "multiple" => multiple::create::mm_from_info_edges(&mut mm, &info_edges_mm),
+        "single" => single::create::mm_from_info_edges(&mut mm, &info_edges_mm),
         _ => unreachable!(),
     }
     Ok(())
@@ -85,6 +77,14 @@ fn handle_run(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+fn handle_sort(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    info_edges::mm_from_sqlite(
+        &mut MemoryManager::new_mmap_mut(matches.value_of("PATH").unwrap(), 0)?,
+        &rusqlite::Connection::open(matches.value_of("SQLITE").unwrap())?,
+    )?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = std::env::temp_dir();
     #[rustfmt::skip]
@@ -95,13 +95,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (setting: clap::AppSettings::SubcommandRequiredElseHelp)
         (@subcommand createdb =>
             (about: "Creates data graph file")
-            (after_help: r"The SQLite3 file must contain the following schema:
-
-  CREATE TABLE vertices (vid INT, vlabel INT);
-  CREATE TABLE edges (src INT, dst INT, elabel INT);
-")
             (@arg FMT: * possible_value[multiple single])
-            (@arg SQLITE: *)
+            (@arg DATA: *)
             (@arg PATH: *)
         )
         (@subcommand dbinfo =>
@@ -134,6 +129,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (@arg ("JOIN-METHOD"): --("join-method") +takes_value default_value("count-rows")
                   possible_values(&["count-rows", "count-rows-slow"]))
         )
+        (@subcommand sort =>
+            (about: "Sort the SQLite graph data")
+            (after_help: r"The SQLite3 file must contain the following schema:
+
+  CREATE TABLE vertices (vid INT, vlabel INT);
+  CREATE TABLE edges (src INT, dst INT, elabel INT);
+")
+            (@arg SQLITE: *)
+            (@arg PATH: *)
+        )
     ).get_matches();
     if let Some(matches) = matches.subcommand_matches("createdb") {
         handle_createdb(matches)?;
@@ -141,6 +146,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         handle_dbinfo(matches)?;
     } else if let Some(matches) = matches.subcommand_matches("run") {
         handle_run(matches)?;
+    } else if let Some(matches) = matches.subcommand_matches("sort") {
+        handle_sort(matches)?;
     }
     Ok(())
 }

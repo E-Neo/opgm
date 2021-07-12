@@ -433,20 +433,22 @@ impl<'a> NeighborIter<DataNeighbor<'a>> for DataNeighborIter<'a> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::multiple::create::mm_from_iter;
+    use crate::data::{info_edges::mm_from_iter, multiple::create::mm_from_info_edges};
 
     fn create_triangle_mm() -> MemoryManager {
-        let mut mm = MemoryManager::Mem(vec![]);
+        let mut info_edges_mm = MemoryManager::new_mem(0);
         mm_from_iter(
-            &mut mm,
+            &mut info_edges_mm,
             vec![(1, 10), (2, 20), (3, 20)].into_iter(),
             vec![(1, 2, 12), (1, 3, 13), (2, 3, 23), (3, 2, 32)].into_iter(),
         );
+        let mut mm = MemoryManager::new_mem(0);
+        mm_from_info_edges(&mut mm, &info_edges_mm);
         mm
     }
 
     fn create_star_mm() -> MemoryManager {
-        let mut mm = MemoryManager::Mem(vec![]);
+        let mut info_edges_mm = MemoryManager::new_mem(0);
         let vertices = vec![(1, 1), (3, 2), (4, 2), (5, 3), (6, 3)];
         let edges = vec![
             (1, 3, 2),
@@ -457,7 +459,9 @@ mod tests {
             (1, 5, 2),
             (1, 6, 2),
         ];
-        mm_from_iter(&mut mm, vertices.into_iter(), edges.into_iter());
+        mm_from_iter(&mut info_edges_mm, vertices.into_iter(), edges.into_iter());
+        let mut mm = MemoryManager::new_mem(0);
+        mm_from_info_edges(&mut mm, &info_edges_mm);
         mm
     }
 
