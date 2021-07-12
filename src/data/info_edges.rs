@@ -29,19 +29,21 @@ where
     let mut chunk_size = 512 * (sys_info::mem_info().unwrap().avail & u64::MAX.shl(20)) as usize
         / size_of::<InfoEdge>();
     info!(
-        "chunk_size = {}G",
+        "chunk_size={}G",
         chunk_size * size_of::<InfoEdge>() / 1024 / 1024 / 1024
     );
+    let mut temp_mm = MemoryManager::new_mem(chunk_size * size_of::<InfoEdge>());
     let mut elabels: HashSet<ELabel> = HashSet::new();
     let mut pos = size_of::<InfoEdgeHeader>();
     let mut chunk_pos = pos;
+    let mut temp_mm_pos = 0;
     info!("scanning edges...");
     let mut num_scanned = 0;
     for (src, dst, elabel) in edges {
         elabels.insert(elabel);
         unsafe {
-            mm.copy_from_slice(
-                pos,
+            temp_mm.copy_from_slice(
+                temp_mm_pos,
                 &[
                     (
                         *vid_vlabel_map.get(&dst).unwrap(),
@@ -64,17 +66,20 @@ where
         }
         num_scanned += 2;
         pos += 2 * size_of::<InfoEdge>();
+        temp_mm_pos += 2 * size_of::<InfoEdge>();
         if num_scanned % chunk_size == 0 {
-            info!("sorting...");
-            unsafe { mm.as_mut_slice::<InfoEdge>(chunk_pos, chunk_size) }.par_sort_unstable();
+            sort_and_write(&mut temp_mm, mm, chunk_pos, chunk_size);
+            temp_mm_pos = 0;
             chunk_pos = pos;
         }
     }
     if pos > chunk_pos {
-        unsafe {
-            mm.as_mut_slice::<InfoEdge>(chunk_pos, (pos - chunk_pos) / size_of::<InfoEdge>())
-        }
-        .par_sort_unstable();
+        sort_and_write(
+            &mut temp_mm,
+            mm,
+            chunk_pos,
+            (pos - chunk_pos) / size_of::<InfoEdge>(),
+        );
     }
     unsafe {
         mm.copy_from_slice::<InfoEdgeHeader>(
@@ -93,7 +98,7 @@ where
     let len = data.len();
     if chunk_size < len {
         info!(
-            "chunk_size = {}G merging...",
+            "chunk_size={}G merging...",
             chunk_size * size_of::<InfoEdge>() / 1024 / 1024 / 1024
         );
         let file = tempfile::tempfile().unwrap();
@@ -128,10 +133,12 @@ pub fn mm_from_sqlite(mm: &mut MemoryManager, conn: &rusqlite::Connection) -> ru
     let num_vertices = conn
         .prepare("SELECT COUNT(*) FROM vertices")?
         .query_row([], |row| row.get(0))?;
+    info!("num_vertices={}", num_vertices);
     info!("quering num_edges...");
     let num_edges = conn
         .prepare("SELECT COUNT(*) FROM edges")?
         .query_row([], |row| row.get(0))?;
+    info!("num_edges={}", num_edges);
     let mut vertices_stmt = conn.prepare("SELECT * FROM vertices")?;
     let mut edges_stmt = conn.prepare("SELECT * FROM edges")?;
     mm_from_iter(
@@ -150,6 +157,17 @@ pub fn mm_from_sqlite(mm: &mut MemoryManager, conn: &rusqlite::Connection) -> ru
         ),
     );
     Ok(())
+}
+
+fn sort_and_write(temp_mm: &mut MemoryManager, mm: &mut MemoryManager, pos: usize, len: usize) {
+    info!("sorting...");
+    unsafe { temp_mm.as_mut_slice::<InfoEdge>(0, len) }.par_sort_unstable();
+    info!("sorted");
+    info!("writing...");
+    unsafe {
+        mm.copy_from_slice(pos, temp_mm.as_slice::<InfoEdge>(0, len));
+    }
+    info!("wrote");
 }
 
 fn create_vid_vlabel_map<V>(vertices: V) -> (HashMap<VId, VLabel>, usize)
