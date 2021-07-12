@@ -80,9 +80,11 @@ where
 /// CREATE TABLE edges (src INT, dst INT, elabel INT);
 /// ```
 pub fn mm_from_sqlite(mm: &mut MemoryManager, conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    info!("quering num_vertices...");
     let num_vertices = conn
         .prepare("SELECT COUNT(*) FROM vertices")?
         .query_row([], |row| row.get(0))?;
+    info!("quering num_edges...");
     let num_edges = conn
         .prepare("SELECT COUNT(*) FROM edges")?
         .query_row([], |row| row.get(0))?;
