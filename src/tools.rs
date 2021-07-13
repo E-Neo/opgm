@@ -56,12 +56,6 @@ pub struct ExactSizeIter<I: Iterator> {
     len: usize,
 }
 
-impl<I: Iterator> ExactSizeIter<I> {
-    pub fn new(iter: I, len: usize) -> Self {
-        Self { iter, len }
-    }
-}
-
 impl<T, I: Iterator<Item = T>> Iterator for ExactSizeIter<I> {
     type Item = T;
 

@@ -1,6 +1,6 @@
 use crate::{
     memory_manager::MemoryManager,
-    tools::{merge, ExactSizeIter},
+    tools::merge,
     types::{ELabel, VId, VLabel},
 };
 use log::info;
@@ -19,18 +19,17 @@ type Edge = (VId, VId, ELabel);
 
 pub fn mm_from_iter<V, E>(mm: &mut MemoryManager, vertices: V, edges: E)
 where
-    V: ExactSizeIterator<Item = Vertex>,
-    E: ExactSizeIterator<Item = Edge>,
+    V: IntoIterator<Item = Vertex>,
+    E: IntoIterator<Item = Edge>,
 {
-    let (num_vertices, num_edges) = (vertices.len(), edges.len());
-    mm.resize(size_of::<InfoEdgeHeader>() + 2 * num_edges * size_of::<InfoEdge>());
+    mm.resize(size_of::<InfoEdgeHeader>());
     info!("scanning vertices...");
     let (vid_vlabel_map, num_vlabels) = create_vid_vlabel_map(vertices);
-    let mut chunk_size = 512 * (sys_info::mem_info().unwrap().avail & u64::MAX.shl(20)) as usize
+    let mut chunk_size = 820 * (sys_info::mem_info().unwrap().avail & u64::MAX.shl(20)) as usize
         / size_of::<InfoEdge>();
     info!(
-        "chunk_size={}G",
-        chunk_size * size_of::<InfoEdge>() / 1024 / 1024 / 1024
+        "chunk_size={}M",
+        chunk_size * size_of::<InfoEdge>() / 1024 / 1024
     );
     let mut temp_mm = MemoryManager::new_mem(chunk_size * size_of::<InfoEdge>());
     let mut elabels: HashSet<ELabel> = HashSet::new();
@@ -85,26 +84,25 @@ where
         mm.copy_from_slice::<InfoEdgeHeader>(
             0,
             &[InfoEdgeHeader {
-                num_vertices: num_vertices as u32,
-                num_edges: num_edges as u64,
+                num_vertices: vid_vlabel_map.len() as u32,
+                num_edges: (num_scanned / 2) as u64,
                 num_vlabels: num_vlabels as u16,
                 num_elabels: elabels.len() as u16,
             }],
         );
     }
-    mm.resize(pos);
     let data: &mut [InfoEdge] =
-        unsafe { mm.as_mut_slice(size_of::<InfoEdgeHeader>(), num_edges * 2) };
+        unsafe { mm.as_mut_slice(size_of::<InfoEdgeHeader>(), num_scanned * 2) };
     let len = data.len();
     if chunk_size < len {
-        info!(
-            "chunk_size={}G merging...",
-            chunk_size * size_of::<InfoEdge>() / 1024 / 1024 / 1024
-        );
         let file = tempfile::tempfile().unwrap();
         file.set_len((len * size_of::<InfoEdge>()) as u64).unwrap();
         let mut buf = unsafe { MmapMut::map_mut(&file).unwrap() };
         while chunk_size < len {
+            info!(
+                "chunk_size={}M merging...",
+                chunk_size * size_of::<InfoEdge>() / 1024 / 1024
+            );
             let mut chunk_begin = 0;
             while chunk_begin < len {
                 merge(
@@ -129,37 +127,22 @@ where
 /// CREATE TABLE edges (src INT, dst INT, elabel INT);
 /// ```
 pub fn mm_from_sqlite(mm: &mut MemoryManager, conn: &rusqlite::Connection) -> rusqlite::Result<()> {
-    info!("quering num_vertices...");
-    let num_vertices = conn
-        .prepare("SELECT COUNT(*) FROM vertices")?
-        .query_row([], |row| row.get(0))?;
-    info!("num_vertices={}", num_vertices);
-    info!("quering num_edges...");
-    let num_edges = conn
-        .prepare("SELECT COUNT(*) FROM edges")?
-        .query_row([], |row| row.get(0))?;
-    info!("num_edges={}", num_edges);
     let mut vertices_stmt = conn.prepare("SELECT * FROM vertices")?;
     let mut edges_stmt = conn.prepare("SELECT * FROM edges")?;
     mm_from_iter(
         mm,
-        ExactSizeIter::new(
-            vertices_stmt
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .filter_map(|row| row.ok()),
-            num_vertices,
-        ),
-        ExactSizeIter::new(
-            edges_stmt
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-                .filter_map(|row| row.ok()),
-            num_edges,
-        ),
+        vertices_stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|row| row.ok()),
+        edges_stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .filter_map(|row| row.ok()),
     );
     Ok(())
 }
 
 fn sort_and_write(temp_mm: &mut MemoryManager, mm: &mut MemoryManager, pos: usize, len: usize) {
+    mm.resize(pos + len * size_of::<InfoEdge>());
     info!("sorting...");
     unsafe { temp_mm.as_mut_slice::<InfoEdge>(0, len) }.par_sort_unstable();
     info!("sorted");
