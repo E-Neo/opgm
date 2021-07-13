@@ -1,15 +1,13 @@
 use crate::{
     memory_manager::MemoryManager,
-    tools::merge,
     types::{ELabel, VId, VLabel},
 };
+use itertools::Itertools;
 use log::info;
-use memmap::MmapMut;
 use rayon::slice::ParallelSliceMut;
 use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
-    ops::Shl,
 };
 
 use super::types::{InfoEdge, InfoEdgeHeader};
@@ -22,27 +20,27 @@ where
     V: IntoIterator<Item = Vertex>,
     E: IntoIterator<Item = Edge>,
 {
-    mm.resize(size_of::<InfoEdgeHeader>());
     info!("scanning vertices...");
     let (vid_vlabel_map, num_vlabels) = create_vid_vlabel_map(vertices);
-    let mut chunk_size = 820 * (sys_info::mem_info().unwrap().avail & u64::MAX.shl(20)) as usize
-        / size_of::<InfoEdge>();
+    let block_size =
+        (sys_info::mem_info().unwrap().avail & 0xfffffffffffffc00) as usize / size_of::<InfoEdge>();
     info!(
-        "chunk_size={}M",
-        chunk_size * size_of::<InfoEdge>() / 1024 / 1024
+        "block_size={}M",
+        block_size * size_of::<InfoEdge>() / 1024 / 1024
     );
-    let mut temp_mm = MemoryManager::new_mem(chunk_size * size_of::<InfoEdge>());
-    let mut elabels: HashSet<ELabel> = HashSet::new();
-    let mut pos = size_of::<InfoEdgeHeader>();
-    let mut chunk_pos = pos;
+    let mut buf_mm = MemoryManager::new_mem(block_size * size_of::<InfoEdge>());
+    let mut buf_mm_pos = 0;
+    let temp_file = tempfile::NamedTempFile::new().unwrap();
+    let mut temp_mm = MemoryManager::new_mmap_mut(temp_file.into_temp_path(), 0).unwrap();
     let mut temp_mm_pos = 0;
+    let mut elabels: HashSet<ELabel> = HashSet::new();
     info!("scanning edges...");
     let mut num_scanned = 0;
     for (src, dst, elabel) in edges {
         elabels.insert(elabel);
         unsafe {
-            temp_mm.copy_from_slice(
-                temp_mm_pos,
+            buf_mm.copy_from_slice(
+                buf_mm_pos,
                 &[
                     (
                         *vid_vlabel_map.get(&dst).unwrap(),
@@ -64,21 +62,35 @@ where
             );
         }
         num_scanned += 2;
-        pos += 2 * size_of::<InfoEdge>();
-        temp_mm_pos += 2 * size_of::<InfoEdge>();
-        if num_scanned % chunk_size == 0 {
-            sort_and_write(&mut temp_mm, mm, chunk_pos, chunk_size);
-            temp_mm_pos = 0;
-            chunk_pos = pos;
+        buf_mm_pos += 2 * size_of::<InfoEdge>();
+        if num_scanned % block_size == 0 {
+            sort_and_write(&mut buf_mm, &mut temp_mm, temp_mm_pos, block_size);
+            buf_mm_pos = 0;
+            temp_mm_pos += block_size * size_of::<InfoEdge>();
         }
     }
-    if pos > chunk_pos {
-        sort_and_write(
-            &mut temp_mm,
-            mm,
-            chunk_pos,
-            (pos - chunk_pos) / size_of::<InfoEdge>(),
-        );
+    if temp_mm_pos == 0 {
+        sort_and_write(&mut buf_mm, mm, size_of::<InfoEdgeHeader>(), num_scanned);
+    } else {
+        if num_scanned * size_of::<InfoEdge>() > temp_mm_pos {
+            sort_and_write(
+                &mut buf_mm,
+                &mut temp_mm,
+                temp_mm_pos,
+                num_scanned - temp_mm_pos / size_of::<InfoEdge>(),
+            );
+        }
+        mm.resize(size_of::<InfoEdgeHeader>() + num_scanned * size_of::<InfoEdge>());
+        let data: &[InfoEdge] = unsafe { temp_mm.as_slice(0, num_scanned) };
+        info!("merging...");
+        for (i, &info_edge) in data.chunks(block_size).kmerge().enumerate() {
+            unsafe {
+                mm.copy_from_slice(
+                    size_of::<InfoEdgeHeader>() + i * size_of::<InfoEdge>(),
+                    &[info_edge],
+                );
+            }
+        }
     }
     unsafe {
         mm.copy_from_slice::<InfoEdgeHeader>(
@@ -90,31 +102,6 @@ where
                 num_elabels: elabels.len() as u16,
             }],
         );
-    }
-    let data: &mut [InfoEdge] =
-        unsafe { mm.as_mut_slice(size_of::<InfoEdgeHeader>(), num_scanned * 2) };
-    let len = data.len();
-    if chunk_size < len {
-        let file = tempfile::tempfile().unwrap();
-        file.set_len((len * size_of::<InfoEdge>()) as u64).unwrap();
-        let mut buf = unsafe { MmapMut::map_mut(&file).unwrap() };
-        while chunk_size < len {
-            info!(
-                "chunk_size={}M merging...",
-                chunk_size * size_of::<InfoEdge>() / 1024 / 1024
-            );
-            let mut chunk_begin = 0;
-            while chunk_begin < len {
-                merge(
-                    &mut data[chunk_begin..std::cmp::min(chunk_begin + 2 * chunk_size, len)],
-                    std::cmp::min(chunk_size, len - chunk_begin),
-                    buf.as_mut_ptr() as *mut InfoEdge,
-                    &mut (|a, b| a < b),
-                );
-                chunk_begin += 2 * chunk_size;
-            }
-            chunk_size *= 2;
-        }
     }
 }
 
