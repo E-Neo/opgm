@@ -22,7 +22,7 @@ where
 {
     info!("scanning vertices...");
     let (vid_vlabel_map, num_vlabels) = create_vid_vlabel_map(vertices);
-    let block_size = 1024 * (sys_info::mem_info().unwrap().avail & 0xfffffffffffffc00) as usize
+    let block_size = 1024 * (sys_info::mem_info().unwrap().avail & 0xfffffffffff00000) as usize
         / size_of::<InfoEdge>();
     info!(
         "block_size={}M",
