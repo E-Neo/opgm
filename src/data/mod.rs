@@ -8,6 +8,7 @@ use crate::{
     types::{VId, VLabel},
 };
 
+pub mod csr;
 pub mod info_edges;
 pub mod multiple;
 pub mod single;
