@@ -140,6 +140,11 @@ where
             return 0;
         }
     }
+    if vertex.in_deg() < info.characteristic().in_deg()
+        || vertex.out_deg() < info.characteristic().out_deg()
+    {
+        return 0;
+    }
     let mut num_vids = 0;
     let &mut (sr_pos, idx_pos) = sr_pos_idx_pos;
     if let Some(mut pos_lens) = allocate(super_row_mm, sr_pos, vertex, info) {
