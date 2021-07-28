@@ -1,7 +1,7 @@
 //! The data graph.
 
 pub use info::GraphInfo;
-pub use view::{GraphView, NeighborView, VertexView};
+pub use view::GraphView;
 
 use crate::{
     pattern::NeighborInfo,

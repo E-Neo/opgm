@@ -1,9 +1,6 @@
 use super::types::{IndexEntry, NeighborEntry, VertexHeader};
 use crate::{
-    data::{
-        Graph, GraphInfo, GraphView, Index, Neighbor, NeighborIter, NeighborView, Vertex,
-        VertexIter, VertexView,
-    },
+    data::{Graph, GraphInfo, GraphView, Index, Neighbor, NeighborIter, Vertex, VertexIter},
     memory_manager::MemoryManager,
     pattern::NeighborInfo,
     types::{ELabel, VId, VLabel},
@@ -102,37 +99,23 @@ impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
     }
 
     fn view(&self) -> GraphView {
-        let global_index = self.index();
-        GraphView::new(self.index().into_iter().map(|(vlabel, _)| {
-            (
-                vlabel,
-                global_index.get(vlabel).map(|vertex| {
-                    VertexView::new(
-                        vertex.id(),
-                        vertex.index().into_iter().map(|(nlabel, neighbors)| {
-                            (
-                                nlabel,
-                                neighbors.map(|neighbor| {
-                                    NeighborView::new(
-                                        neighbor.id(),
-                                        if neighbor.n_to_v_elabel() >= 0 {
-                                            vec![neighbor.n_to_v_elabel()]
-                                        } else {
-                                            vec![]
-                                        },
-                                        if neighbor.v_to_n_elabel() >= 0 {
-                                            vec![neighbor.v_to_n_elabel()]
-                                        } else {
-                                            vec![]
-                                        },
-                                    )
-                                }),
-                            )
-                        }),
-                    )
-                }),
-            )
-        }))
+        let (mut vertices, mut edges) = (vec![], vec![]);
+        for (vlabel, vs) in self.index() {
+            for v in vs {
+                vertices.push((v.id(), vlabel));
+                for (_, ns) in v.index() {
+                    for n in ns {
+                        let elabel = n.v_to_n_elabel();
+                        if elabel >= 0 {
+                            edges.push((v.id(), n.id(), elabel));
+                        }
+                    }
+                }
+            }
+        }
+        vertices.sort();
+        edges.sort();
+        GraphView::new(vertices, edges)
     }
 }
 

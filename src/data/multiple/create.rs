@@ -203,9 +203,6 @@ mod tests {
         );
         let mut mm = MemoryManager::new_mem(0);
         mm_from_info_edges(&mut mm, &info_edges_mm);
-        assert_eq!(
-            DataGraph::new(&mm).view(),
-            GraphView::from_iter(vertices, edges)
-        );
+        assert_eq!(DataGraph::new(&mm).view(), GraphView::new(vertices, edges));
     }
 }
