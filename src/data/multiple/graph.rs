@@ -1,4 +1,4 @@
-use super::types::{IndexEntry, NeighborHeader, VertexHeader};
+use super::types::{Header, IndexEntry, NeighborHeader, VertexHeader};
 use crate::{
     data::{Graph, GraphInfo, GraphView, Index, Neighbor, NeighborIter, Vertex, VertexIter},
     memory_manager::MemoryManager,
@@ -68,10 +68,13 @@ impl<'a> DataGraph<'a> {
 
 impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
     fn index(&self) -> GlobalIndex<'a> {
-        let &num_vlabels = unsafe { self.mm.as_ref::<u64>(size_of::<u64>()) };
+        let &Header { num_vlabels, .. } = unsafe { self.mm.as_ref(size_of::<u64>()) };
         GlobalIndex {
             mm: &self.mm,
-            index: unsafe { self.mm.as_slice(2 * size_of::<u64>(), num_vlabels as usize) },
+            index: unsafe {
+                self.mm
+                    .as_slice(size_of::<u64>() + size_of::<Header>(), num_vlabels as usize)
+            },
         }
     }
 
@@ -80,26 +83,18 @@ impl<'a> Graph<GlobalIndex<'a>> for DataGraph<'a> {
     }
 
     fn info(&self) -> GraphInfo {
-        let (mut num_vertices, mut num_edges) = (0, 0);
-        let mut elabels = HashSet::new();
-        for (_, vertices) in self.index() {
-            num_vertices += vertices.len();
-            for vertex in vertices {
-                for (_, neighbors) in vertex.index() {
-                    for neighbor in neighbors {
-                        num_edges += neighbor.num_v_to_n() + neighbor.num_n_to_v();
-                        neighbor.n_to_v_elabels().iter().for_each(|&elabel| {
-                            elabels.insert(elabel);
-                        });
-                        neighbor.v_to_n_elabels().iter().for_each(|&elabel| {
-                            elabels.insert(elabel);
-                        });
-                    }
-                }
-            }
-        }
-        num_edges /= 2;
-        GraphInfo::new(num_vertices, num_edges, self.index().len(), elabels.len())
+        let &Header {
+            num_vertices,
+            num_edges,
+            num_vlabels,
+            num_elabels,
+        } = unsafe { self.mm.as_ref(size_of::<u64>()) };
+        GraphInfo::new(
+            num_vertices as usize,
+            num_edges as usize,
+            num_vlabels as usize,
+            num_elabels as usize,
+        )
     }
 
     fn view(&self) -> GraphView {

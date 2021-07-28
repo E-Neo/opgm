@@ -1,7 +1,10 @@
 use super::types::{IndexEntry, NeighborHeader, VertexHeader};
 use crate::{
     constants::MAGIC_MULTIPLE,
-    data::types::{InfoEdge, InfoEdgeHeader},
+    data::{
+        single::types::Header,
+        types::{InfoEdge, InfoEdgeHeader},
+    },
     memory_manager::MemoryManager,
     tools::GroupBy,
     types::{ELabel, VId, VLabel},
@@ -13,25 +16,31 @@ pub fn mm_from_info_edges(mm: &mut MemoryManager, info_edges_mm: &MemoryManager)
         num_vertices,
         num_edges,
         num_vlabels,
-        ..
+        num_elabels,
     } = unsafe { info_edges_mm.as_ref::<InfoEdgeHeader>(0) };
-    let (num_vertices, num_edges, num_vlabels) = (
+    mm.resize(estimate_datagraph_size(
+        num_vlabels as usize,
         num_vertices as usize,
         num_edges as usize,
-        num_vlabels as usize,
-    );
-    mm.resize(estimate_datagraph_size(
-        num_vlabels,
-        num_vertices,
-        num_edges,
     ));
     unsafe {
-        mm.copy_from_slice::<u64>(0, &[MAGIC_MULTIPLE]);
-        mm.copy_from_slice::<u64>(size_of::<u64>(), &[num_vlabels as u64]);
+        mm.copy_from_slice(0, &[MAGIC_MULTIPLE]);
+        mm.copy_from_slice(
+            size_of::<u64>(),
+            &[Header {
+                num_vertices,
+                num_edges,
+                num_vlabels,
+                num_elabels,
+            }],
+        );
     }
-    let mut pos = 2 * size_of::<u64>() + num_vlabels * size_of::<IndexEntry>();
+    let mut pos =
+        size_of::<u64>() + size_of::<Header>() + num_vlabels as usize * size_of::<IndexEntry>();
     for (i, (vlabel, vlabel_group)) in GroupBy::new(
-        unsafe { info_edges_mm.as_slice::<InfoEdge>(size_of::<InfoEdgeHeader>(), 2 * num_edges) },
+        unsafe {
+            info_edges_mm.as_slice::<InfoEdge>(size_of::<InfoEdgeHeader>(), 2 * num_edges as usize)
+        },
         |e| e.0,
     )
     .enumerate()
@@ -39,7 +48,7 @@ pub fn mm_from_info_edges(mm: &mut MemoryManager, info_edges_mm: &MemoryManager)
         let (new_pos, len) = write_vertices(mm, pos, vlabel_group);
         write_index_entry(
             mm,
-            2 * size_of::<u64>() + i * size_of::<IndexEntry>(),
+            size_of::<u64>() + size_of::<Header>() + i * size_of::<IndexEntry>(),
             vlabel,
             pos as u64,
             len,
@@ -51,7 +60,7 @@ pub fn mm_from_info_edges(mm: &mut MemoryManager, info_edges_mm: &MemoryManager)
 
 fn estimate_datagraph_size(num_vlabels: usize, num_vertices: usize, num_edges: usize) -> usize {
     let vlabel_pos_len_size = size_of::<IndexEntry>() * num_vlabels;
-    let header_size = 2 * size_of::<u64>() + vlabel_pos_len_size;
+    let header_size = size_of::<u64>() + size_of::<Header>() + vlabel_pos_len_size;
     let vertex_header_size = size_of::<VertexHeader>() * num_vertices;
     let vertex_vlabel_pos_len_size = vlabel_pos_len_size * num_vertices;
     let neighbor_header_size = size_of::<NeighborHeader>() * num_edges * 2;
