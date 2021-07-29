@@ -114,9 +114,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (@arg DIRECTORY: --directory +takes_value
                   default_value(temp_dir.to_str().ok_or("temp dir")?))
             (@arg NAME: --name +takes_value default_value[opgm])
-            (@arg ("SR-MM-TYPE"): --("sr-mm-type") +takes_value default_value[mmap]
+            (@arg ("SR-MM-TYPE"): --("sr-mm-type") +takes_value default_value[mem]
                   possible_value[mem mmap sink])
-            (@arg ("INDEX-MM-TYPE"): --("index-mm-type") +takes_value default_value[mmap]
+            (@arg ("INDEX-MM-TYPE"): --("index-mm-type") +takes_value default_value[mem]
                   possible_value[mem mmap sink])
             (@arg ("INDEX-TYPE"): --("index-type") +takes_value default_value[hash]
                   possible_value[sorted hash])
