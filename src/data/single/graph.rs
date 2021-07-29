@@ -315,7 +315,6 @@ impl<'a> Neighbor for DataNeighbor<'a> {
         info.n_to_v_elabels().contains(&self.n_to_v_elabel()) as usize
             + info.v_to_n_elabels().contains(&self.v_to_n_elabel()) as usize
             + info.undirected_elabels().contains(&self.n_to_v_elabel()) as usize
-            + info.undirected_elabels().contains(&self.v_to_n_elabel()) as usize
             == info.n_to_v_elabels().len()
                 + info.v_to_n_elabels().len()
                 + info.undirected_elabels().len()
