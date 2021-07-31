@@ -14,6 +14,7 @@ pub fn mm_from_info_edges(mm: &mut MemoryManager, info_edges_mm: &MemoryManager)
         num_edges,
         num_vlabels,
         num_elabels,
+        ..
     } = unsafe { info_edges_mm.as_ref::<InfoEdgeHeader>(0) };
     mm.resize(estimate_datagraph_size(
         num_vlabels as usize,

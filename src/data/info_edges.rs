@@ -21,7 +21,7 @@ where
     E: IntoIterator<Item = Edge>,
 {
     info!("scanning vertices...");
-    let (vid_vlabel_map, num_vlabels) = create_vid_vlabel_map(vertices);
+    let (vid_vlabel_map, num_vlabels, vid_max) = create_vid_vlabel_map(vertices);
     let block_size = 1024 * (sys_info::mem_info().unwrap().avail & 0xfffffffffff00000) as usize
         / size_of::<InfoEdge>();
     info!(
@@ -92,16 +92,16 @@ where
             }
         }
     }
+    let header = InfoEdgeHeader {
+        num_vertices: vid_vlabel_map.len() as u32,
+        num_edges: (num_scanned / 2) as u64,
+        num_vlabels: num_vlabels as u16,
+        num_elabels: elabels.len() as u16,
+        vid_max,
+    };
+    info!("{:?}", header);
     unsafe {
-        mm.copy_from_slice::<InfoEdgeHeader>(
-            0,
-            &[InfoEdgeHeader {
-                num_vertices: vid_vlabel_map.len() as u32,
-                num_edges: (num_scanned / 2) as u64,
-                num_vlabels: num_vlabels as u16,
-                num_elabels: elabels.len() as u16,
-            }],
-        );
+        mm.copy_from_slice::<InfoEdgeHeader>(0, &[header]);
     }
 }
 
@@ -140,17 +140,21 @@ fn sort_and_write(temp_mm: &mut MemoryManager, mm: &mut MemoryManager, pos: usiz
     info!("wrote");
 }
 
-fn create_vid_vlabel_map<V>(vertices: V) -> (HashMap<VId, VLabel>, usize)
+fn create_vid_vlabel_map<V>(vertices: V) -> (HashMap<VId, VLabel>, usize, VId)
 where
     V: IntoIterator<Item = Vertex>,
 {
     let mut label_set = HashSet::new();
     let mut vid_vlabel_map = HashMap::new();
+    let mut vid_max = -1;
     for (vid, vlabel) in vertices {
         label_set.insert(vlabel);
         vid_vlabel_map.insert(vid, vlabel);
+        if vid > vid_max {
+            vid_max = vid;
+        }
     }
-    (vid_vlabel_map, label_set.len())
+    (vid_vlabel_map, label_set.len(), vid_max)
 }
 
 #[cfg(test)]
@@ -178,10 +182,11 @@ mod tests {
             num_edges,
             num_vlabels,
             num_elabels,
+            vid_max,
         } = unsafe { mm.as_ref::<InfoEdgeHeader>(0) };
         assert_eq!(
-            (num_vertices, num_edges, num_vlabels, num_elabels),
-            (3, 3, 2, 3)
+            (num_vertices, num_edges, num_vlabels, num_elabels, vid_max),
+            (3, 3, 2, 3, 3)
         );
         assert_eq!(
             unsafe {
