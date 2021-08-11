@@ -12,7 +12,7 @@ readme = "README.md"
 [dependencies]
 clap = "2.33"
 derive_more = "0.99"
-env_logger = "0.8"
+env_logger = "0.9"
 itertools = "0.10"
 log = "0.4"
 memmap = "0.7"
